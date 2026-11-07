@@ -1,0 +1,22 @@
+/* Self-hosted official Google Fonts. See public/fonts/*-OFL.txt. */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/barlow-700.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'M PLUS 1';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/m-plus-1-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Zen Kaku Gothic New';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/zen-kaku-gothic-new-700.ttf') format('truetype');
+}
