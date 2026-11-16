@@ -1,6 +1,6 @@
 import { autoHoldStatements } from './auto-hold';
 import { database, staffPassword } from "../db";
-import { canManageSettings, active, code, targetTags, dayKey, estimateWait, type GameTable, type ParticipationStats, type Session, type Settings, type Ticket } from "./types";
+import { canManageSettings, active, code, targetTags, dayKey, estimateWait, reentryTerms, type GameTable, type ParticipationStats, type Session, type Settings, type Ticket } from "./types";
 import { cookie, failure, hash, HttpError, legacyStaffCookie, operationId, payload, randomToken, requireRole, requireStaff, response, session, sessionToken, throttle, validSetupKey } from "./auth";
 import { createRecovery, recoverVisitor } from './recovery';
 import { MAX_EVENT_TITLE_LENGTH } from './branding';
@@ -11,6 +11,7 @@ const occupied = ['called','seated','playing'];
 const rows = async <T>(sql:string,...args:(string|number|null)[]) => (await database().prepare(sql).bind(...args).all<T>()).results;
 const getSettings = async () => (await database().prepare("SELECT * FROM settings WHERE id=1").first<Settings>())!;
 function integer(value:unknown,min:number,max:number) { if(typeof value!=="number" || !Number.isInteger(value) || value<min || value>max) throw new HttpError(400,"数値の入力を確認してください。"); return value; }
+const optional=(value:unknown,min:number,max:number)=>value===undefined?null:integer(value,min,max);
 function text(value:unknown,max=30) { if(typeof value!=="string" || !value.trim() || value.trim().length>max) throw new HttpError(400,"入力内容を確認してください。"); return value.trim(); }
 async function replay(op:string,s:Session) {
   const old=await database().prepare("SELECT actor FROM operations WHERE id=?").bind(op).first<{actor:string}>();
@@ -173,6 +174,14 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     changes={status:'finished',finished_at:now,final_chips:integer(b.score,0,10000000),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
   } else if(action==='correct') {
     requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:integer(b.score,0,10000000)};
+  } else if(action==='reentry') {
+    // A busted player buys a new stack during the same slot. The time is not
+    // extended; the fee is recorded as its own payment so the revenue includes it.
+    requireRole(s,['admin','reception','operator']); state(['playing']); if(!t.paid) throw new HttpError(409,"未入金のためリエントリーできません。");
+    const terms=reentryTerms(await getSettings(),t.kind);
+    if(b.fee!==undefined && b.fee!==terms.fee) throw new HttpError(409,"リエントリーの料金が変更されました。最新の状態を確認してください。");
+    const count=t.reentry_count+1;
+    changes={reentry_count:count,reentry_chips:t.reentry_chips+terms.chips}; payment=terms.fee; paymentType='reentry-'+count;
   } else if(action==='hold') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。");
     if(now-(t.called_at ?? now)<180000) throw new HttpError(409,"呼び出しから3分経過後に不在を確定できます。");
@@ -224,7 +233,7 @@ async function settingsAction(request:Request,b:Record<string,unknown>) {
   const eventName=b.event_name===undefined?before.event_name:text(b.event_name,MAX_EVENT_TITLE_LENGTH);
   const minutes=integer(b.minutes,1,180);
   await db.batch([
-    db.prepare("UPDATE settings SET event_name=?,fee=?,minutes=?,chips=?,beginner_open=COALESCE(?,beginner_open),expert_open=COALESCE(?,expert_open) WHERE id=1").bind(eventName,integer(b.fee,0,100000),minutes,integer(b.chips,1,1000000),b.beginner_open===undefined?null:b.beginner_open?1:0,b.expert_open===undefined?null:b.expert_open?1:0),
+    db.prepare("UPDATE settings SET event_name=?,fee=?,minutes=?,chips=?,beginner_open=COALESCE(?,beginner_open),expert_open=COALESCE(?,expert_open),reentry_fee_beginner=COALESCE(?,reentry_fee_beginner),reentry_fee_expert=COALESCE(?,reentry_fee_expert),reentry_chips_beginner=COALESCE(?,reentry_chips_beginner),reentry_chips_expert=COALESCE(?,reentry_chips_expert) WHERE id=1").bind(eventName,integer(b.fee,0,100000),minutes,integer(b.chips,1,1000000),b.beginner_open===undefined?null:b.beginner_open?1:0,b.expert_open===undefined?null:b.expert_open?1:0,optional(b.reentry_fee_beginner,0,100000),optional(b.reentry_fee_expert,0,100000),optional(b.reentry_chips_beginner,0,1000000),optional(b.reentry_chips_expert,0,1000000)),
     // Shift each existing deadline by its duration difference. This preserves
     // elapsed play and accumulated pauses, including a currently paused table.
     // Update versions in the same transaction so stale start/finish actions fail.
@@ -240,7 +249,7 @@ async function settingsAction(request:Request,b:Record<string,unknown>) {
 async function exportCsv(request:Request) {
   const s=await requireStaff(request); requireRole(s,['admin']);
   const saved = await rows<{csv_row: string}>("SELECT csv_row FROM ticket_csv_backup ORDER BY ticket_id");
-  const header = ['営業日','受付番号','ニックネーム','種別','状態','卓','席','入金済','料金','開始','予定終了','実際終了','初期チップ','最終チップ'];
+  const header = ['営業日','受付番号','ニックネーム','種別','状態','卓','席','入金済','料金','開始','予定終了','実際終了','初期チップ','最終チップ','リエントリー回数','リエントリーチップ'];
   const result = [header.map(label => '"' + label + '"').join(','), ...saved.map(row => row.csv_row)].join('\r\n');
   return new Response('\uFEFF'+result,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="festival.csv"','Cache-Control':'no-store'}});
 }

@@ -10,13 +10,21 @@ export interface Ticket {
   queued_at: number; created_at: number; called_at: number | null; table_id: string | null; seat: number | null;
   paid: number; fee: number; minutes: number; initial_chips: number; final_chips: number | null;
   started_at: number | null; ends_at: number | null; finished_at: number | null; paused_ms: number; version: number; last_op: string;
+  reentry_count: number; reentry_chips: number;
 }
 export interface GameTable { id: string; name: string; kind: Kind; seat_count: number; assignment_locked: number; archived_at: number | null; paused_at: number | null; version: number }
 export const DEFAULT_TABLE_SEATS = 9;
 export const MAX_TABLE_SEATS = 9;
 export const MAX_TABLE_NAME_LENGTH = 30;
 export const tableName = (tables: GameTable[], id: string | null) => tables.find(t=>t.id===id)?.name ?? `テーブル ${id ?? '—'}`;
-export interface Settings { fee: number; minutes: number; chips: number; beginner_open: number; expert_open: number; event_name: string; tags_json: string }
+export interface Settings { fee: number; minutes: number; chips: number; beginner_open: number; expert_open: number; event_name: string; tags_json: string;
+  reentry_fee_beginner: number; reentry_fee_expert: number; reentry_chips_beginner: number; reentry_chips_expert: number }
+/** Fee and chips for one re-entry of the given kind. */
+export const reentryTerms = (settings: Settings, kind: Kind) => kind === 'expert'
+  ? {fee: settings.reentry_fee_expert, chips: settings.reentry_chips_expert}
+  : {fee: settings.reentry_fee_beginner, chips: settings.reentry_chips_beginner};
+/** Chips put in by the player: the initial stack plus every re-entry. */
+export const investedChips = (ticket: Pick<Ticket,'initial_chips'|'reentry_chips'>) => ticket.initial_chips + (ticket.reentry_chips ?? 0);
 export interface Session { user_id: string; role: Role; table_id: string | null; expires_at: number }
 export interface ParticipationStats {
   kind: Kind;
