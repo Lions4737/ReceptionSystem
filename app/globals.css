@@ -1470,12 +1470,12 @@ label { gap: 10px; font-size: 14px; margin: 24px 0; }
 .workspace > .sidebar { transition: transform 160ms ease; }
 .sidebar-collapsed > .sidebar { transform: translateX(-100%); visibility: hidden; pointer-events: none; }
 .sidebar-collapsed > .workspace-body { margin-left: 0; }
-.sidebar-collapsed > .sidebar-toggle { left: 28px; }
-.sidebar-collapsed > .workspace-body > .main { padding-top: 64px; }
+.sidebar-collapsed > .sidebar-toggle { left: 0; top: 26px; width: 26px; height: 32px; border-radius: 0 4px 4px 0; }
+
 @media (max-width: 1180px) { .sidebar-toggle { left: 160px; } }
 @media (max-width: 960px) {
   .sidebar-toggle { position: absolute; left: auto; right: 12px; }
   .sidebar-collapsed > .sidebar { display: none; }
-  .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 24px; right: auto; }
+  .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 0; right: auto; top: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { .workspace > .sidebar { transition: none; } }
