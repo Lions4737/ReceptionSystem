@@ -38,6 +38,21 @@ jobs:
       - name: Build and package Pages
         run: npm run build:pages
       - name: Apply production migrations
-        run: npx wrangler d1 migrations apply utpoker-festival-reception --remote --config wrangler.pages.jsonc
+        run: |
+          if npx wrangler d1 migrations apply utpoker-festival-reception --remote --config wrangler.pages.jsonc > "$RUNNER_TEMP/migrations.log" 2>&1; then
+            cat "$RUNNER_TEMP/migrations.log"
+          else
+            cat "$RUNNER_TEMP/migrations.log"
+            echo "::error::$(tail -30 "$RUNNER_TEMP/migrations.log" | tr '\n' ' ')"
+            exit 1
+          fi
       - name: Deploy main to the existing Pages project
-        run: npx wrangler pages deploy --cwd dist/pages --project-name utpoker-festival-reception --branch main --commit-hash "$GITHUB_SHA"
+        working-directory: dist/pages
+        run: |
+          if npx wrangler pages deploy --project-name utpoker-festival-reception --branch main --commit-hash "$GITHUB_SHA" > "$RUNNER_TEMP/deploy.log" 2>&1; then
+            cat "$RUNNER_TEMP/deploy.log"
+          else
+            cat "$RUNNER_TEMP/deploy.log"
+            echo "::error::$(tail -30 "$RUNNER_TEMP/deploy.log" | tr '\n' ' ')"
+            exit 1
+          fi
