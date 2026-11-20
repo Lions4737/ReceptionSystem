@@ -1459,3 +1459,20 @@ label { gap: 10px; font-size: 14px; margin: 24px 0; }
 @media (max-width: 600px) {
   .group-registration-break { display: initial; }
 }
+
+/* Keep the menu control available when the navigation is folded away. */
+.sidebar-toggle { position: fixed; z-index: 30; top: 8px; left: 188px; width: 36px; height: 32px; display: grid; place-items: center; border: 1px solid #555; background: var(--dark); color: white; border-radius: 4px; font-size: 26px; line-height: 1; cursor: pointer; }
+.sidebar-toggle:hover { background: #323232; }
+.sidebar-toggle:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+.workspace > .sidebar { transition: transform 160ms ease; }
+.sidebar-collapsed > .sidebar { transform: translateX(-100%); visibility: hidden; pointer-events: none; }
+.sidebar-collapsed > .workspace-body { margin-left: 0; }
+.sidebar-collapsed > .sidebar-toggle { left: 12px; }
+.sidebar-collapsed > .workspace-body > .main { padding-top: 56px; }
+@media (max-width: 1180px) { .sidebar-toggle { left: 160px; } }
+@media (max-width: 960px) {
+  .sidebar-toggle { position: absolute; left: auto; right: 12px; }
+  .sidebar-collapsed > .sidebar { display: none; }
+  .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 12px; right: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .workspace > .sidebar { transition: none; } }
