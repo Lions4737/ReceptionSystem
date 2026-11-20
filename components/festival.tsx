@@ -2,6 +2,7 @@
 import { useEventPath } from './event-routing';
 import Link from 'next/link';
 import Image from 'next/image';
+import { QRCodeSVG } from 'qrcode.react';
 import { RestoreTicket, ReturnToTicket } from './ticket-recovery';
 import { TicketExitWarning } from './ticket-exit-warning';
 import { TableTimers } from './table-timers';
@@ -12,7 +13,7 @@ import { ReceptionFilter } from './reception-filter';
 import { EventTitle, useEventTitle } from './event-title';
 import { MAX_EVENT_TITLE_LENGTH } from '../lib/branding';
 import { usePathname, useRouter } from 'next/navigation';
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { canManageSettings, acceptsKind, targetTags, tableName, active, clockText, code, kindLabel, remaining, statusLabel, type Kind, type Snapshot, type Ticket } from '../lib/types';
 
 async function post(url:string,body:Record<string,unknown>) {
@@ -535,7 +536,13 @@ export function SettingsPage() {
  </>}</Frame>;
 }
 
+const subscribeToDisplayOrigin = () => () => {};
+const getDisplayOrigin = () => window.location.origin;
+const getServerDisplayOrigin = () => '';
+
 export function Display() {
+  const eventPath = useEventPath();
+  const origin = useSyncExternalStore(subscribeToDisplayOrigin, getDisplayOrigin, getServerDisplayOrigin);
   const {data,error,now}=useSnapshot('display');
   const tags = targetTags(data);
   return <div className="display-page">
@@ -568,14 +575,20 @@ export function Display() {
 
       </div>
     </main>
-        <aside className="display-bottom" aria-label="待ち人数">
+    <aside className="display-registration" aria-label="参加受付と待ち人数">
+      <Link className="display-qr" href={eventPath('/join')}>
+        {origin && <QRCodeSVG value={origin + eventPath('/join')} size={320} marginSize={4} title="参加受付のQRコード"/>}
+        <span>QRコードから参加受付</span>
+      </Link>
+      <div className="display-bottom" aria-label="待ち人数">
             {tags.map(({id}) => (
               <div key={id}>
                 <span>{kindLabel(id,tags)}テーブル</span>
                 <b>{data?.queues?.[id] ?? '—'} <small>人待ち</small></b>
               </div>
             ))}
-        </aside>
+      </div>
+    </aside>
   </div>;
 }
 

@@ -913,6 +913,17 @@ label { gap: 10px; font-size: 14px; margin: 24px 0; }
 .display-bottom > div > b { white-space: nowrap; }
 .display-bottom b { font-family: var(--heading); font-size: 36px; }
 .display-bottom span { color: var(--gray); font-size: 14px; }
+.display-registration { width: 100%; max-width: 1280px; margin-inline: auto; display: grid; justify-items: center; gap: 24px; }
+.display-qr { display: grid; justify-items: center; gap: 12px; }
+.display-qr svg { display: block; width: clamp(160px, 23dvh, 360px); height: auto; background: white; }
+.display-qr > span { font-size: clamp(16px, 2vw, 24px); font-weight: 700; }
+@media (orientation: portrait) {
+  .display-page { padding-top: clamp(24px, 4vh, 64px); gap: clamp(24px, 3vh, 48px); }
+  .display-registration { gap: clamp(24px, 3vh, 48px); }
+  .display-qr svg { width: min(44vw, 25dvh, 440px); }
+  .display-bottom b { font-size: clamp(36px, 6vw, 64px); }
+  .display-bottom span { font-size: clamp(14px, 2.4vw, 24px); }
+}
 
 @media (min-width: 1472px) {
   .public-footer { margin-inline: auto; }
