@@ -1,5 +1,6 @@
 'use client';
 
+import { useEventPath } from './event-routing';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,7 +9,7 @@ import { code, type Ticket } from '../lib/types';
 type Recovery = {code:string;expiresAt:number};
 
 async function request(path:string,body:Record<string,unknown>) {
-  const response=await fetch('/api/'+path,{
+  const response=await fetch(path,{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({op:crypto.randomUUID(),...body}),
   });
@@ -18,30 +19,32 @@ async function request(path:string,body:Record<string,unknown>) {
 }
 
 export function ReturnToTicket() {
+  const eventPath = useEventPath();
   return <aside className="return-ticket" aria-label="受付済みの方へ">
     <div><strong>すでに受付をお済みですか？</strong><p>番号と待ち状況は、ここから確認できます。</p></div>
     <div className="return-ticket-actions">
-      <Link className="button primary" href="/me">自分の受付を開く <span aria-hidden="true">→</span></Link>
-      <Link className="text-link" href="/restore">復帰コードで開く</Link>
+      <Link className="button primary" href={eventPath('/me')}>自分の受付を開く <span aria-hidden="true">→</span></Link>
+      <Link className="text-link" href={eventPath('/restore')}>復帰コードで開く</Link>
     </div>
   </aside>;
 }
 
 export function RecoveryCard({ticket,forStaff=false}:{ticket:Ticket;forStaff?:boolean}) {
+  const eventPath = useEventPath();
   const [saved,setSaved]=useState<(Recovery & {url:string})|null>(null);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[attempt,setAttempt]=useState(0);
   const linkRef=useRef<HTMLInputElement>(null);
   useEffect(()=>{
     let current=true;
-    void request('recovery',forStaff?{ticketId:ticket.id}:{}).then(data=>{
+    void request(eventPath('/api/recovery'),forStaff?{ticketId:ticket.id}:{}).then(data=>{
       if(!data.recovery) throw new Error('保存情報を取得できませんでした。');
-      const url=new URL('/restore',window.location.origin);
+      const url=new URL(eventPath('/restore'),window.location.origin);
       // Fragments stay out of HTTP access logs and referrer headers.
       url.hash=new URLSearchParams({code:data.recovery.code}).toString();
       if(current) {setSaved({...data.recovery,url:url.toString()});setError('');}
     }).catch(e=>{if(current)setError(e instanceof Error?e.message:'保存情報を取得できませんでした。');});
     return()=>{current=false;};
-  },[ticket.id,forStaff,attempt]);
+  },[ticket.id,forStaff,attempt,eventPath]);
 
   const copy=async()=>{
     if(!saved) return;
@@ -87,16 +90,17 @@ export function RecoveryCard({ticket,forStaff=false}:{ticket:Ticket;forStaff?:bo
 }
 
 export function RestoreTicket() {
+  const eventPath = useEventPath();
   const router=useRouter();
   const [value,setValue]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const started=useRef(false),lock=useRef(false);
   const restore=useCallback(async(code:string)=>{
     if(lock.current) return;
     lock.current=true;setBusy(true);setError('');
-    try {await request('restore',{code});router.replace('/me');}
+    try {await request(eventPath('/api/restore'),{code});router.replace(eventPath('/me'));}
     catch(e) {setError(e instanceof Error?e.message:'通信を確認して、もう一度お試しください。');setBusy(false);}
     finally {lock.current=false;}
-  },[router]);
+  },[router,eventPath]);
   useEffect(()=>{
     if(started.current) return;
     started.current=true;
@@ -105,7 +109,7 @@ export function RestoreTicket() {
   },[restore]);
 
   return <main id="main-content" tabIndex={-1} className="mobile-main">
-    <Link href="/" className="back-link">← ホームへ</Link>
+    <Link href={eventPath('/join')} className="back-link">← ホームへ</Link>
     <div className="eyebrow">WELCOME BACK</div>
     <h1>受付を開き直す</h1>
     <p className="lead">保存した復帰コードを入力すると、元の受付に戻れます。新しく受付し直す必要はありません。</p>
@@ -116,7 +120,7 @@ export function RestoreTicket() {
       <p className="form-help">受付番号（B-001など）とは別の、12文字の英数字です。</p>
       {error&&<div className="notice" role="alert">{error}</div>}
       <button className="button primary full large" disabled={busy||!value.trim()}>{busy?'受付を開いています…':'自分の受付を開く →'}</button>
-      <p className="form-help center"><Link href="/me">同じブラウザなら、そのまま受付を確認 →</Link></p>
+      <p className="form-help center"><Link href={eventPath('/me')}>同じブラウザなら、そのまま受付を確認 →</Link></p>
     </form>
     <div className="tip"><div><b>リンクもコードも見つからない場合</b><p>新しく受付せず、スタッフにお声がけください。受付番号やお名前を確認して、開き直すためのリンクをご案内します。</p></div></div>
   </main>;

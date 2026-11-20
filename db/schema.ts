@@ -6,10 +6,6 @@ export const settings = sqliteTable("settings", {
   beginnerOpen: integer("beginner_open").notNull().default(1), expertOpen: integer("expert_open").notNull().default(1),
   tagsJson: text("tags_json").notNull().default('[{"id":"beginner","name":"初心者","open":1,"version":0},{"id":"expert","name":"経験者","open":1,"version":0}]'),
   eventName: text("event_name").notNull().default("POKER FESTIVAL"),
-  reentryFeeBeginner: integer("reentry_fee_beginner").notNull().default(0),
-  reentryFeeExpert: integer("reentry_fee_expert").notNull().default(300),
-  reentryChipsBeginner: integer("reentry_chips_beginner").notNull().default(100),
-  reentryChipsExpert: integer("reentry_chips_expert").notNull().default(200),
 });
 export const tables = sqliteTable("game_tables", {
   id: text("id").primaryKey(), name: text("name").notNull(), kind: text("kind").notNull(),
@@ -39,7 +35,6 @@ export const tickets = sqliteTable("tickets", {
   initialChips: integer("initial_chips").notNull(), finalChips: integer("final_chips"),
   startedAt: integer("started_at"), endsAt: integer("ends_at"), finishedAt: integer("finished_at"),
   pausedMs: integer("paused_ms").notNull().default(0), version: integer("version").notNull().default(0),
-  reentryCount: integer("reentry_count").notNull().default(0), reentryChips: integer("reentry_chips").notNull().default(0),
   lastOp: text("last_op").notNull(),
 }, t => [
   index("idx_tickets_queue").on(t.day, t.kind, t.status, t.queuedAt, t.id),

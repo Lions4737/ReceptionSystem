@@ -1,0 +1,4 @@
+CREATE TABLE event_reentry_settings (
+  event_namespace TEXT PRIMARY KEY NOT NULL,
+  fee INTEGER NOT NULL DEFAULT 300 CHECK(fee BETWEEN 0 AND 100000)
+);

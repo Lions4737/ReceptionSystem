@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { assignedStatuses, manualStatuses, manualStatusIssue, manualStatusPaymentIssue } from '../lib/manual-status';
+import { assignedStatuses, manualStatuses, manualStatusIssue, manualStatusWarning } from '../lib/manual-status';
 import { statusLabel, targetTags, type Kind, type Role, type Snapshot, type Status, type Ticket } from '../lib/types';
 
 type Props = {
@@ -106,6 +106,7 @@ function StatusPicker({ value, ticket, role, disabled, onChange }: {
 
 export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave }: Props) {
   const seatWarningId = useId();
+  const [acknowledged, setAcknowledged] = useState(false);
   const [nickname, setNickname] = useState(ticket.nickname);
   const [status, setStatus] = useState<Status>(ticket.status);
   const [kind, setKind] = useState(ticket.kind);
@@ -125,20 +126,20 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
     Array.from({ length: table.seat_count }, (_, i) => ({ table, seat: i + 1 }))
   ).filter(s => {
     const keepsSeat = assignedStatuses.includes(ticket.status) && ticket.table_id === s.table.id && ticket.seat === s.seat;
-    if (keepsSeat) return !statusChanged || s.table.paused_at === null;
+    if (keepsSeat) return !statusChanged || status === 'seated' || s.table.paused_at === null;
     return s.table.paused_at === null && !s.table.assignment_locked &&
       !data.tickets.some(t => t.id !== ticket.id && t.table_id === s.table.id && t.seat === s.seat && assignedStatuses.includes(t.status));
   });
   const validSeat = available.some(s => `${s.table.id}:${s.seat}` === seat);
   const noAvailableSeats = mustChooseSeat && !available.length;
   const selectedIssue = manualStatusIssue(ticket, status, role);
-  const paymentWarning = manualStatusPaymentIssue(ticket, status);
+  const warning = manualStatusWarning(ticket, status);
   const current = data.tickets.find(t => t.id === ticket.id);
   const stale = !current || current.version !== ticket.version;
 
   return <form className="status-editor" onSubmit={async event => {
     event.preventDefault();
-    if (selectedIssue || busy || stale || offline) return;
+    if (selectedIssue || busy || stale || offline || (warning && !acknowledged)) return;
     const form = new FormData(event.currentTarget), [table, number] = seat.split(':');
     await onSave({ action: 'set-status', id: ticket.id, version: ticket.version, status,
       ...(nicknameChanged ? { nickname: nickname.trim() } : {}),
@@ -161,7 +162,7 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       {targetTags(data).map(tag => <option key={tag.id} value={tag.id}>{tag.name}（{tag.id === 'beginner' ? 'B' : 'E'}）</option>)}
     </select></label>
     <StatusPicker value={status} ticket={ticket} role={role} disabled={busy} onChange={next => {
-      setStatus(next);
+      setStatus(next); setAcknowledged(false);
       if (next !== 'called' && assignedStatuses.includes(next) && !validSeat) {
         const first = available.find(option => option.table.paused_at === null); setSeat(first ? `${first.table.id}:${first.seat}` : '');
       }
@@ -170,7 +171,8 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       <option value="">席を選択してください</option>{available.map(s => <option key={`${s.table.id}:${s.seat}`} value={`${s.table.id}:${s.seat}`}>{s.table.name} · {s.seat}番席</option>)}
     </select></label>}
     {status === 'finished' && status !== ticket.status && <label>最終チップ数<input name="score" type="number" min={0} max={10000000} step={1} required placeholder="例：1500" disabled={busy}/></label>}
-    {(error || selectedIssue || stale || offline) && <p className={paymentWarning && selectedIssue === paymentWarning ? "settings-error" : "form-help"} role="alert">{selectedIssue || error || (stale ? '他の操作で更新されました。一度閉じて、最新の受付から開き直してください。' : '接続を確認してから変更してください。')}</p>}
-    <button className="button primary full" disabled={busy || offline || stale || !nickname.trim() || (!statusChanged && !nicknameChanged && !kindChanged && !seatChanged) || !!selectedIssue || (mustChooseSeat && (!canChooseSeat || !validSeat))}>{busy ? '変更中…' : '変更を保存'}</button>
+    {(error || selectedIssue || stale || offline) && <p className="settings-error" role="alert">{selectedIssue || error || (stale ? '他の操作で更新されました。一度閉じて、最新の受付から開き直してください。' : '接続を確認してから変更してください。')}</p>}
+    {<div className="status-change-warning" role="alert"><strong>ステータス変更の注意</strong><p>{warning}</p><label><input type="checkbox" checked={acknowledged} disabled={busy} onChange={event=>setAcknowledged(event.target.checked)}/>影響を確認して変更する</label></div>}
+    <button className="button primary full" disabled={busy || offline || stale || (!!warning && !acknowledged) || !nickname.trim() || (!statusChanged && !nicknameChanged && !kindChanged && !seatChanged) || !!selectedIssue || (mustChooseSeat && (!canChooseSeat || !validSeat))}>{busy ? '変更中…' : '変更を保存'}</button>
   </form>;
 }

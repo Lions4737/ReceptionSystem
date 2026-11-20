@@ -1,6 +1,7 @@
+import { merchandiseAction, merchandiseSnapshot } from './merchandise';
 import { autoHoldStatements } from './auto-hold';
-import { database, staffPassword } from "../db";
-import { canManageSettings, active, code, targetTags, dayKey, estimateWait, reentryTerms, type GameTable, type ParticipationStats, type Session, type Settings, type Ticket } from "./types";
+import { baseDatabase, currentNamespace, database, staffPassword, withEvent } from "../db";
+import { canManageSettings, active, code, targetTags, dayKey, estimateWait, type GameTable, type ParticipationStats, type Session, type Settings, type Ticket } from "./types";
 import { cookie, failure, hash, HttpError, legacyStaffCookie, operationId, payload, randomToken, requireRole, requireStaff, response, session, sessionToken, throttle, validSetupKey } from "./auth";
 import { createRecovery, recoverVisitor } from './recovery';
 import { MAX_EVENT_TITLE_LENGTH } from './branding';
@@ -9,9 +10,8 @@ import { statusCorrection } from './status-correction';
 import { autoSeatTicket } from './auto-assignment';
 const occupied = ['called','seated','playing'];
 const rows = async <T>(sql:string,...args:(string|number|null)[]) => (await database().prepare(sql).bind(...args).all<T>()).results;
-const getSettings = async () => (await database().prepare("SELECT * FROM settings WHERE id=1").first<Settings>())!;
+const getSettings = async () => (await database().prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()).first<Settings>())!;
 function integer(value:unknown,min:number,max:number) { if(typeof value!=="number" || !Number.isInteger(value) || value<min || value>max) throw new HttpError(400,"数値の入力を確認してください。"); return value; }
-const optional=(value:unknown,min:number,max:number)=>value===undefined?null:integer(value,min,max);
 function text(value:unknown,max=30) { if(typeof value!=="string" || !value.trim() || value.trim().length>max) throw new HttpError(400,"入力内容を確認してください。"); return value.trim(); }
 async function replay(op:string,s:Session) {
   const old=await database().prepare("SELECT actor FROM operations WHERE id=?").bind(op).first<{actor:string}>();
@@ -25,9 +25,9 @@ async function snapshot(request:Request,scope:string) {
   // table edit cannot produce a snapshot combining different database states.
   const [, , settingsResult, tablesResult, ticketsResult] = await db.batch([
     ...autoHoldStatements(db, now),
-    db.prepare("SELECT * FROM settings WHERE id=1"),
+    db.prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()),
     db.prepare("SELECT * FROM game_tables ORDER BY length(id),id"),
-    db.prepare("SELECT * FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id").bind(day),
+    db.prepare("SELECT *, (SELECT COUNT(*) FROM payments p WHERE p.ticket_id=tickets.id AND p.type LIKE 'reentry:%') AS reentry_count FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id").bind(day),
   ]);
   const settings=settingsResult.results[0] as unknown as Settings;
   const allTables=tablesResult.results as unknown as GameTable[];
@@ -49,7 +49,7 @@ async function snapshot(request:Request,scope:string) {
       FROM tickets t
       GROUP BY t.kind
     `) : undefined;
-    return response({...base,me,tickets:visible,archivedTables:canManageSettings(me!.role)?allTables.filter(t=>t.archived_at!==null):undefined,revenue,participationStats,total:tickets.filter(t=>t.day===day && t.status!=='cancelled').length});
+    return response({...base,me,tickets:visible,archivedTables:canManageSettings(me!.role)?allTables.filter(t=>t.archived_at!==null):undefined,revenue,participationStats,merchandise:canManageSettings(me!.role)?await merchandiseSnapshot():undefined,total:tickets.filter(t=>t.day===day && t.status!=='cancelled').length});
   }
   if(scope==='me') {
     if(!me || me.role!=='player') return response({...base,me,tickets:[]});
@@ -61,11 +61,11 @@ async function snapshot(request:Request,scope:string) {
   return response({...base,me:null,tickets:[],called:scope==='display' ? tickets.filter(t=>t.status==='called').map(t=>({code:code(t),table_id:t.table_id,seat:t.seat})) : []});
 }
 async function login(request:Request,b:Record<string,unknown>) {
-  await throttle(request);
+  await withEvent('', () => throttle(request));
   const token=randomToken(), tokenHash=await hash(token), db=database(), now=Date.now();
   const password = b.password ?? b.key;
   if(await validSetupKey(password)) {
-    await db.prepare("INSERT INTO sessions(hash,user_id,role,expires_at) VALUES(?,?,'admin',?)").bind(tokenHash,'admin',now+12*3600000).run();
+    await baseDatabase().prepare("INSERT INTO sessions(hash,user_id,role,expires_at) VALUES(?,?,'admin',?)").bind(tokenHash,'admin',now+12*3600000).run();
     return response({ok:true,role:'admin'},200,{'Set-Cookie':cookie(request,token,12*3600,'staff')});
   }
   const expected = staffPassword();
@@ -73,7 +73,7 @@ async function login(request:Request,b:Record<string,unknown>) {
     if (!expected || typeof password !== 'string' || await hash(password) !== await hash(expected)) {
       throw new HttpError(401, 'パスワードが違います。');
     }
-    await db.prepare("INSERT INTO sessions(hash,user_id,role,expires_at) VALUES(?,?,'operator',?)")
+    await baseDatabase().prepare("INSERT INTO sessions(hash,user_id,role,expires_at) VALUES(?,?,'operator',?)")
       .bind(tokenHash,crypto.randomUUID(),now+12*3600000).run();
     return response({ok:true,role:'operator'},200,{'Set-Cookie':cookie(request,token,12*3600,'staff')});
   }
@@ -85,6 +85,13 @@ async function login(request:Request,b:Record<string,unknown>) {
   if(!results[0].meta.changes) throw new HttpError(401,"コードが違うか、有効期限が切れています。");
   return response({ok:true},200,{'Set-Cookie':cookie(request,token,12*3600,'staff')});
 }
+// A finished or cancelled ticket releases its nickname for the next play.
+const activeNickname = "lower(trim(nickname))=lower(?) AND status NOT IN ('finished','cancelled')";
+async function rejectDuplicateNickname(nickname: string, exceptId = 0) {
+  const duplicate = await database().prepare(`SELECT 1 FROM tickets WHERE ${activeNickname} AND id<>? LIMIT 1`)
+    .bind(nickname, exceptId).first();
+  if (duplicate) throw new HttpError(409, '同じニックネームで受付中です。別の名前を入力してください。');
+}
 async function join(request:Request,b:Record<string,unknown>) {
   const db=database(), now=Date.now(), op=operationId(b);
   const proxy=b.proxy===true;
@@ -92,15 +99,22 @@ async function join(request:Request,b:Record<string,unknown>) {
   if(proxy) { if(!s) throw new HttpError(401,"ログインしてください。"); requireRole(s,['admin','reception','operator']); }
   if(!s) throw new HttpError(401,"画面を更新して受付をやり直してください。");
   if(await replay(op,s)) return response({ok:true},200);
+  const ownActive = async () => !proxy && !!await db.prepare("SELECT id FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold') LIMIT 1").bind(s.user_id).first();
+  if(await ownActive()) return response({ok:true},200);
   const kind=b.kind; if(kind!=='beginner' && kind!=='expert') throw new HttpError(400,"卓の種別を選んでください。");
-  if (!proxy && (typeof b.nickname !== 'string' || !b.nickname.trim())) {
+  if (typeof b.nickname !== 'string' || !b.nickname.trim()) {
     throw new HttpError(400, 'ニックネームを入力してください。');
   }
-  const nickname=typeof b.nickname==='string' && b.nickname.trim() ? text(b.nickname) : `ゲスト${Math.floor(Math.random()*900+100)}`;
+  const previous = proxy ? null : await db.prepare('SELECT nickname FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 1').bind(s.user_id).first<{nickname:string}>();
+  const nickname = previous?.nickname ?? text(b.nickname);
   const player=proxy ? 'proxy-'+crypto.randomUUID() : s.user_id;
-  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND EXISTS(SELECT 1 FROM game_tables WHERE kind=? AND archived_at IS NULL) AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250`).bind(player,dayKey(now),nickname,kind,now,now,op,kind);
+  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND EXISTS(SELECT 1 FROM game_tables WHERE kind=? AND archived_at IS NULL) AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250 AND NOT EXISTS(SELECT 1 FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold')) ${previous ? '' : `AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname})`}`).bind(player,dayKey(now),nickname,kind,now,now,op,kind,player,...(previous?[]:[nickname]));
   const results=await db.batch([insert,db.prepare("INSERT INTO operations(id,actor,action,ticket_id,created_at) SELECT ?,?,'join',id,? FROM tickets WHERE last_op=?").bind(op,s.user_id,now,op)]);
-  if(!results[0].meta.changes) throw new HttpError(409,"現在この種別の受付を停止しています。");
+  if (!results[0].meta.changes) {
+    if(await ownActive()) return response({ok:true},200);
+    if(!previous) await rejectDuplicateNickname(nickname);
+    throw new HttpError(409, "現在この種別の受付を停止しています。");
+  }
   return response({ok:true},201);
 }
 async function mutate(request:Request,b:Record<string,unknown>) {
@@ -128,6 +142,10 @@ async function mutate(request:Request,b:Record<string,unknown>) {
       const correction = await statusCorrection({...t, kind},b,s,now);
       changes = correction.changes;
       correctionTable = correction.table;
+      if (changes.paid !== undefined && changes.paid !== t.paid) {
+        payment = changes.paid ? t.fee : -t.fee;
+        paymentType = 'status-correction:' + op;
+      }
     }
     if (nickname !== t.nickname) changes.nickname = nickname;
     if (kindChanged) {
@@ -139,7 +157,7 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     changes={status:'called',table_id:null,seat:null,called_at:now};
   } else if(action==='pay') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"すでに入金済みです。");
-    changes={paid:1,table_id:null,seat:null}; payment=t.fee; paymentType='payment';
+    changes={paid:1,table_id:null,seat:null}; payment=t.fee; paymentType='payment:' + op;
   } else if(action==='seat') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(!t.paid) throw new HttpError(409,"先に支払いを登録してください。");
     if (b.auto === true || (b.table === undefined && t.table_id === null)) return await autoSeatTicket(t, s, op, now);
@@ -161,6 +179,18 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   } else if(action==='start') {
     requireRole(s,['admin','dealer','operator']); state(['seated']); if(!t.paid) throw new HttpError(409,"未入金のため開始できません。");
     changes={status:'playing',started_at:now,ends_at:now+t.minutes*60000};
+  } else if(action==='reentry') {
+    requireRole(s,['admin','dealer','operator']); state(['playing']);
+    if(b.confirmed!==true) throw new HttpError(400,'追加料金の受け取りを確認してください。');
+    const settings=await getSettings();
+    if(b.expected_fee!==settings.reentry_fee) throw new HttpError(409,'リエントリー料金が変更されました。一度閉じて最新の金額を確認してください。');
+    const table=await db.prepare('SELECT * FROM game_tables WHERE id=? AND archived_at IS NULL').bind(t.table_id).first<GameTable>();
+    if(!table || table.kind!=='expert' || t.kind!=='expert' || !t.paid || !t.seat) throw new HttpError(409,'リエントリーは入金済みでプレイ中の経験者卓のみ利用できます。');
+    if(!t.ends_at || t.ends_at <= (table.paused_at??now)) throw new HttpError(409,'プレイ時間が終了しています。');
+    correctionTable=table;
+    // Keep seat, original duration, deadline and pause accounting untouched.
+    changes={initial_chips:t.initial_chips};
+    payment=settings.reentry_fee; paymentType='reentry:' + op;
   } else if(action==='adjust-time') {
     requireRole(s,['admin','dealer','operator']); state(['playing']);
     const seconds=integer(b.seconds,0,180*60);
@@ -174,14 +204,6 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     changes={status:'finished',finished_at:now,final_chips:integer(b.score,0,10000000),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
   } else if(action==='correct') {
     requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:integer(b.score,0,10000000)};
-  } else if(action==='reentry') {
-    // A busted player buys a new stack during the same slot. The time is not
-    // extended; the fee is recorded as its own payment so the revenue includes it.
-    requireRole(s,['admin','reception','operator']); state(['playing']); if(!t.paid) throw new HttpError(409,"未入金のためリエントリーできません。");
-    const terms=reentryTerms(await getSettings(),t.kind);
-    if(b.fee!==undefined && b.fee!==terms.fee) throw new HttpError(409,"リエントリーの料金が変更されました。最新の状態を確認してください。");
-    const count=t.reentry_count+1;
-    changes={reentry_count:count,reentry_chips:t.reentry_chips+terms.chips}; payment=terms.fee; paymentType='reentry-'+count;
   } else if(action==='hold') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。");
     if(now-(t.called_at ?? now)<180000) throw new HttpError(409,"呼び出しから3分経過後に不在を確定できます。");
@@ -196,21 +218,28 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     changes={status:'cancelled',paid:0,table_id:null,seat:null}; payment=-t.fee; paymentType='refund';
   } else throw new HttpError(400,"不明な操作です。");
   const returnsToFront=t.status==='hold' && changes.status==='waiting';
-  const final={...t,...changes,version:version+1,last_op:op};
+  const final={...t,...changes,version:version+1,last_op:op,...(action==='reentry'?{reentry_chips:200,reentry_fee:payment}:{})};
   const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND kind=? AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
   const movingPlaying = action === 'set-status' && t.status === 'playing' && changes.status === undefined && changes.table_id !== undefined;
+  const reentryGuard = action==='reentry' ? ' AND COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300)=?' : '';
   const sourceGuard = movingPlaying ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=tickets.table_id AND paused_at IS NULL AND archived_at IS NULL)' : '';
   const correctionGuard=correctionTable?' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND version=? AND archived_at IS NULL)':'';
+  const checkNickname = active(final) && (!active(t) || final.nickname !== t.nickname);
+  const nicknameGuard = checkNickname ? ` AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname} AND id<>?)` : '';
   const args=[...Object.values(changes),version+1,op,id,version,...(action==='start' ? [t.table_id,t.kind,t.seat] : action==='move-seat' ? [t.table_id,changes.seat] : []),...(correctionTable?[correctionTable.id,correctionTable.version]:[])];
   // Choose the front position in the write itself, so concurrent returns do not
   // share a stale queue position. Beginner and expert queues remain independent.
   const assignments=Object.keys(changes).map(k=>k==='queued_at' && returnsToFront
     ? "queued_at=COALESCE((SELECT MIN(q.queued_at)-1 FROM tickets q WHERE q.status='waiting' AND q.kind=tickets.kind),?)"
     : `${k}=?`).join(',');
-  const statements=[db.prepare(`UPDATE tickets SET ${assignments},version=?,last_op=? WHERE id=? AND version=?${extra}${correctionGuard}${sourceGuard}`).bind(...args)];
+  const statements=[db.prepare(`UPDATE tickets SET ${assignments},version=?,last_op=? WHERE id=? AND version=?${extra}${correctionGuard}${sourceGuard}${reentryGuard}${nicknameGuard}`).bind(...args, ...(action==='reentry'?[currentNamespace(),payment]:[]), ...(checkNickname ? [final.nickname, id] : []))];
   if(paymentType) statements.push(db.prepare("INSERT INTO payments(id,ticket_id,amount,type,created_at,actor) SELECT ?,id,?,?,?,? FROM tickets WHERE id=? AND last_op=?").bind(op,payment,paymentType,now,s.user_id,id,op));
   statements.push(db.prepare("INSERT INTO operations(id,actor,action,ticket_id,before_json,after_json,reason,created_at) SELECT ?,?,?,id,?,json_set(?, '$.queued_at', queued_at),?,? FROM tickets WHERE id=? AND last_op=?").bind(op,s.user_id,action,JSON.stringify(t),JSON.stringify(final),typeof b.reason==='string'?b.reason:null,now,id,op));
-  const result=await db.batch(statements); if(!result[0].meta.changes) throw new HttpError(409,"状態が更新されました。最新の状態を確認してください。");
+  const result = await db.batch(statements);
+  if (!result[0].meta.changes) {
+    if (checkNickname) await rejectDuplicateNickname(final.nickname, id);
+    throw new HttpError(409, "状態が更新されました。最新の状態を確認してください。");
+  }
   return response({ok:true});
 }
 async function tableAction(request:Request,b:Record<string,unknown>) {
@@ -233,7 +262,8 @@ async function settingsAction(request:Request,b:Record<string,unknown>) {
   const eventName=b.event_name===undefined?before.event_name:text(b.event_name,MAX_EVENT_TITLE_LENGTH);
   const minutes=integer(b.minutes,1,180);
   await db.batch([
-    db.prepare("UPDATE settings SET event_name=?,fee=?,minutes=?,chips=?,beginner_open=COALESCE(?,beginner_open),expert_open=COALESCE(?,expert_open),reentry_fee_beginner=COALESCE(?,reentry_fee_beginner),reentry_fee_expert=COALESCE(?,reentry_fee_expert),reentry_chips_beginner=COALESCE(?,reentry_chips_beginner),reentry_chips_expert=COALESCE(?,reentry_chips_expert) WHERE id=1").bind(eventName,integer(b.fee,0,100000),minutes,integer(b.chips,1,1000000),b.beginner_open===undefined?null:b.beginner_open?1:0,b.expert_open===undefined?null:b.expert_open?1:0,optional(b.reentry_fee_beginner,0,100000),optional(b.reentry_fee_expert,0,100000),optional(b.reentry_chips_beginner,0,1000000),optional(b.reentry_chips_expert,0,1000000)),
+    db.prepare("INSERT INTO event_reentry_settings(event_namespace,fee) VALUES(?,?) ON CONFLICT(event_namespace) DO UPDATE SET fee=excluded.fee").bind(currentNamespace(),b.reentry_fee===undefined?before.reentry_fee:integer(b.reentry_fee,0,100000)),
+    db.prepare("UPDATE settings SET event_name=?,fee=?,minutes=?,chips=?,beginner_open=COALESCE(?,beginner_open),expert_open=COALESCE(?,expert_open) WHERE id=1").bind(eventName,integer(b.fee,0,100000),minutes,integer(b.chips,1,1000000),b.beginner_open===undefined?null:b.beginner_open?1:0,b.expert_open===undefined?null:b.expert_open?1:0),
     // Shift each existing deadline by its duration difference. This preserves
     // elapsed play and accumulated pauses, including a currently paused table.
     // Update versions in the same transaction so stale start/finish actions fail.
@@ -249,7 +279,7 @@ async function settingsAction(request:Request,b:Record<string,unknown>) {
 async function exportCsv(request:Request) {
   const s=await requireStaff(request); requireRole(s,['admin']);
   const saved = await rows<{csv_row: string}>("SELECT csv_row FROM ticket_csv_backup ORDER BY ticket_id");
-  const header = ['営業日','受付番号','ニックネーム','種別','状態','卓','席','入金済','料金','開始','予定終了','実際終了','初期チップ','最終チップ','リエントリー回数','リエントリーチップ'];
+  const header = ['営業日','受付番号','ニックネーム','種別','状態','卓','席','入金済','料金','開始','予定終了','実際終了','初期チップ','最終チップ'];
   const result = [header.map(label => '"' + label + '"').join(','), ...saved.map(row => row.csv_row)].join('\r\n');
   return new Response('\uFEFF'+result,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="festival.csv"','Cache-Control':'no-store'}});
 }
@@ -282,6 +312,7 @@ export async function handlePost(request:Request) {
     if(path==='join') return await join(request,b);
     if(path==='action') return await mutate(request,b);
     if(path==='table') return await tableAction(request,b);
+    if(path==='merchandise') return await merchandiseAction(request,b);
     if(path==='settings') return await settingsAction(request,b);
     if(path==='table-config') return await configureTable(request,b);
     if(path==='logout') {
@@ -290,6 +321,9 @@ export async function handlePost(request:Request) {
         const token=sessionToken(request,scope);
         if(!token) continue;
         const removed=await database().prepare("DELETE FROM sessions WHERE hash=? AND role<>'player'").bind(await hash(token)).run();
+        if (scope === 'staff' && currentNamespace()) {
+          await baseDatabase().prepare("DELETE FROM sessions WHERE hash=? AND role IN ('admin','operator')").bind(await hash(token)).run();
+        }
         if(scope==='player' && removed.meta.changes) headers.append('Set-Cookie',cookie(request,'',0));
       }
       return response({ok:true},200,headers);

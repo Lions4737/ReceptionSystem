@@ -36,7 +36,7 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
   try {
     assert.equal((await change('invalid')).status,400);
     assert.equal((await change('hold',{reason:'x'.repeat(201)})).status,400);
-    for(const status of ['seated','playing','finished']) assert.equal((await change(status,{table,seat:1,score:0})).status,409);
+    for(const status of ['seated','playing']) assert.equal((await change(status,{table,seat:99})).status,400);
     assert.equal((await change('called',{table,seat:4})).status,200);
     assert.equal((await current()).table_id,null); assert.equal((await current()).seat,null);
     assert.equal((await change('hold')).status,200);
@@ -50,7 +50,9 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     assert.equal((await change('called',{table,seat:1})).status,200);
     assert.equal((await action('pay')).status,200);
     const revenue = (await admin('staff')).data.revenue;
-    for(const status of ['waiting','hold','cancelled']) assert.equal((await change(status)).status,409);
+    for(const status of ['waiting','hold','called']) assert.equal((await change(status)).status,200);
+    assert.equal((await current()).paid,0);
+    assert.equal((await action('pay')).status,200);
     assert.equal((await change('seated',{table,seat:1})).status,200);
     assert.equal((await change('playing',{table,seat:1})).status,200);
     ticket=await current(); assert.equal(ticket.ends_at-ticket.started_at,ticket.minutes*60000);
@@ -95,7 +97,13 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     ticket=await current(); assert.equal(ticket.final_chips,null); assert.equal(ticket.finished_at,null);
     let state=await getTable();
     assert.equal((await admin('table',{table,version:state.version})).status,200);
-    assert.equal((await change('seated',{table,seat:2})).status,409);
+    // A paused table can retain the same seat when returning to start-waiting.
+    assert.equal((await change('seated',{table,seat:2})).status,200);
+    state=await getTable();
+    assert.equal((await admin('table',{table,version:state.version})).status,200);
+    assert.equal((await change('playing',{table,seat:2})).status,200);
+    state=await getTable();
+    assert.equal((await admin('table',{table,version:state.version})).status,200);
     assert.equal((await action('adjust-time',{seconds:0})).status,200);
     state=await getTable();
     assert.equal((await current()).ends_at,state.paused_at);
@@ -145,8 +153,9 @@ test('手動変更でも権限・席競合・古い更新・返金済み受付�
     assert.equal((await secondAction('call')).status,200);
     assert.equal((await secondAction('pay')).status,200);
     assert.equal((await secondAction('set-status',{status:'seated',table,seat:1})).status,409);
-    assert.equal((await change('playing',{table,seat:1},reception)).status,409);
-    assert.equal((await change('finished',{score:0},reception)).status,409);
+    assert.equal((await change('playing',{table,seat:1},reception)).status,200);
+    assert.equal((await change('finished',{score:0},reception)).status,200);
+    assert.equal((await change('seated',{table,seat:1},reception)).status,200);
     assert.equal((await action('refund',{reason:'テスト返金'})).status,200);
     assert.equal((await change('waiting')).status,409);
     assert.equal((await current()).status,'cancelled');

@@ -1,7 +1,7 @@
 // Paid tickets can still be marked "called" while waiting for a seat.
 const eligible = "status = 'called' AND paid = 0 AND called_at <= ?";
 
-export function autoHoldStatements(db: D1Database, now: number): D1PreparedStatement[] {
+export function autoHoldStatements(db: Pick<D1Database, 'prepare'>, now: number): D1PreparedStatement[] {
   const cutoff = now - 60 * 60 * 1000;
   const operationPrefix = crypto.randomUUID() + '-';
   return [

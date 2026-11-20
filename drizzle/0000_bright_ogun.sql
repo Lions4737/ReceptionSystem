@@ -100,4 +100,5 @@ CREATE INDEX `idx_tickets_player` ON `tickets` (`player_id`,`id`);--> statement-
 CREATE UNIQUE INDEX `one_active_ticket_per_player` ON `tickets` (`player_id`) WHERE "tickets"."status" IN ('waiting','called','seated','playing','hold');--> statement-breakpoint
 CREATE UNIQUE INDEX `one_active_player_per_seat` ON `tickets` (`table_id`,`seat`) WHERE "tickets"."status" IN ('called','seated','playing');--> statement-breakpoint
 INSERT INTO settings(id) VALUES(1);
-
+--> statement-breakpoint
+INSERT INTO game_tables(id,name,kind) VALUES('A','テーブル A','expert'),('B','テーブル B','beginner'),('C','テーブル C','beginner');

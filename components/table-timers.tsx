@@ -1,5 +1,6 @@
 'use client';
 
+import { useEventPath } from './event-routing';
 import Link from 'next/link';
 import { useRef, useState } from 'react';
 import { canManageSettings, code, targetTags, kindLabel, remaining, type Snapshot, type Ticket } from '../lib/types';
@@ -13,6 +14,7 @@ type Props = {
   error: string;
   message: string;
   onStart: (ticket: Ticket) => void;
+  onReentry: (ticket: Ticket) => void;
   onFinish: (ticket: Ticket) => void;
   onEditTime: (ticket: Ticket) => void;
   onTogglePause: () => void;
@@ -32,7 +34,8 @@ function Countdown({ milliseconds, empty = false }: { milliseconds: number; empt
 
 // Multi-Timer's compact, three-column timer surface, connected to reception
 // tickets and the shared server clock instead of device-local timer state.
-export function TableTimers({ id, data, now, busy, error, message, onStart, onFinish, onEditTime, onTogglePause, onMove }: Props) {
+export function TableTimers({ id, data, now, busy, error, message, onStart, onFinish, onReentry, onEditTime, onTogglePause, onMove }: Props) {
+  const eventPath = useEventPath();
   const [moving, setMoving] = useState<number | null>(null);
   const [dropSeat, setDropSeat] = useState<number | null>(null);
   const [dragPoint, setDragPoint] = useState<{x:number;y:number;width:number;height:number} | null>(null);
@@ -46,8 +49,8 @@ export function TableTimers({ id, data, now, busy, error, message, onStart, onFi
   if (!table) return <section className={styles.board}>
     <h1>{data.tables.length ? 'このテーブルは現在使われていません' : 'テーブルがまだありません'}</h1>
     <p className="form-help">{data.tables.length ? '別のテーブルを選択してください。' : '運営設定からテーブルを追加してください。'}</p>
-    <div className={styles.navigation}><nav aria-label="テーブルを選択">{data.tables.filter(item => data.me?.role !== 'dealer' || item.id === data.me.table_id).map(item => <Link key={item.id} href={'/staff/table/' + item.id}>{item.name}</Link>)}</nav></div>
-    {canManageSettings(data.me?.role) ? <Link className="button outline" href="/staff/settings#table-settings">テーブル構成を設定する</Link> : data.me?.role === 'dealer' && <p>担当テーブルの変更は運営スタッフにご確認ください。</p>}
+    <div className={styles.navigation}><nav aria-label="テーブルを選択">{data.tables.filter(item => data.me?.role !== 'dealer' || item.id === data.me.table_id).map(item => <Link key={item.id} href={eventPath('/staff/table/') + item.id}>{item.name}</Link>)}</nav></div>
+    {canManageSettings(data.me?.role) ? <Link className="button outline" href={eventPath('/staff/settings#table-settings')}>テーブル構成を設定する</Link> : data.me?.role === 'dealer' && <p>担当テーブルの変更は運営スタッフにご確認ください。</p>}
   </section>;
 
   return <section className={`${styles.board}${paused ? ` ${styles.paused}` : ''}`} aria-label={`${table.name} のタイマー`}>
@@ -62,12 +65,12 @@ export function TableTimers({ id, data, now, busy, error, message, onStart, onFi
     <div className={styles.navigation}>
       <nav aria-label="テーブルを選択">
         {data.tables.filter(item => data.me?.role !== 'dealer' || item.id === data.me.table_id).map(item =>
-          <Link key={item.id} href={'/staff/table/' + item.id} aria-current={id === item.id ? 'page' : undefined}>{item.name}</Link>
+          <Link key={item.id} href={eventPath('/staff/table/') + item.id} aria-current={id === item.id ? 'page' : undefined}>{item.name}</Link>
         )}
       </nav>
       <div className={styles.configuration}>
         <span>{occupied.length} / {table.seat_count} 席 {!authorized && '・表示のみ'}</span>
-        {canManageSettings(data.me?.role) && <Link className={styles.settingsLink} href="/staff/settings#table-settings">テーブル・席数を設定 ↗</Link>}
+        {canManageSettings(data.me?.role) && <Link className={styles.settingsLink} href={eventPath('/staff/settings#table-settings')}>テーブル・席数を設定 ↗</Link>}
       </div>
     </div>
 
@@ -131,7 +134,9 @@ export function TableTimers({ id, data, now, busy, error, message, onStart, onFi
             <Countdown milliseconds={milliseconds}/>
           </button> : <Countdown milliseconds={milliseconds} empty={!ticket}/>}
           {(caption || target) && <p className={styles.caption}>{target ? dropSeat === index + 1 ? 'ここで離して移動' : 'ここへドラッグして移動' : caption}</p>}
+          {!!ticket?.reentry_count && <p className={styles.caption}>リエントリー {ticket.reentry_count}回</p>}
           {ticket && <div className={styles.controls}>
+            {playing && table.kind==='expert' && ticket.kind==='expert' && authorized && <button type="button" disabled={disabled || expired} onClick={()=>onReentry(ticket)}>リエントリー · ¥{data.settings.reentry_fee.toLocaleString()}</button>}
             {!playing && <button type="button" disabled={disabled || !authorized || ticket.status !== 'seated' || paused} onClick={() => onStart(ticket)}>▶ 開始</button>}
             {playing && <button type="button" disabled={disabled || !authorized} onClick={() => onFinish(ticket)}>終了・点数入力</button>}
           </div>}

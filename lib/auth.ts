@@ -1,4 +1,4 @@
-import { database, setupKey } from "../db";
+import { baseDatabase, currentNamespace, database, setupKey } from "../db";
 import type { Session } from "./types";
 export class HttpError extends Error { constructor(public status: number,message: string) { super(message); } }
 export const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(32)),n=>n.toString(16).padStart(2,"0")).join("");
@@ -8,11 +8,15 @@ const cookieNames: Record<SessionScope, string> = {
   player: 'festival_session',
   staff: 'festival_staff_session',
 };
+function cookieName(scope: SessionScope) {
+  const namespace = currentNamespace();
+  return scope === 'player' && namespace ? cookieNames.player + '_' + namespace.slice(4, -1) : cookieNames[scope];
+}
 export function cookie(request: Request,token:string,maxAge=86400*7,scope:SessionScope='player') {
-  return `${cookieNames[scope]}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol==="https:" ? "; Secure" : ""}`;
+  return `${cookieName(scope)}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol==="https:" ? "; Secure" : ""}`;
 }
 export function sessionToken(request:Request,scope:SessionScope): string|null {
-  return request.headers.get('cookie')?.match(new RegExp(`(?:^|;\\s*)${cookieNames[scope]}=([a-f0-9]{64})(?:;|$)`))?.[1] ?? null;
+  return request.headers.get('cookie')?.match(new RegExp(`(?:^|;\\s*)${cookieName(scope)}=([a-f0-9]{64})(?:;|$)`))?.[1] ?? null;
 }
 async function resolveSession(request:Request,scope:SessionScope) {
   // Existing staff sessions used the visitor cookie. Accept them until they
@@ -22,6 +26,11 @@ async function resolveSession(request:Request,scope:SessionScope) {
     const token=sessionToken(request,source);
     if(!token) continue;
     const value=await database().prepare("SELECT user_id, role, table_id, expires_at FROM sessions WHERE hash=? AND expires_at>?").bind(await hash(token),Date.now()).first<Session>();
+    if (!value && scope === 'staff' && source === 'staff' && currentNamespace()) {
+      const shared = await baseDatabase().prepare("SELECT user_id, role, table_id, expires_at FROM sessions WHERE hash=? AND expires_at>? AND role IN ('admin','operator')")
+        .bind(await hash(token), Date.now()).first<Session>();
+      if (shared) return {value: shared, token, source};
+    }
     if(value && (scope==='player'?value.role==='player':value.role!=='player')) return {value,token,source};
   }
   return null;
