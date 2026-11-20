@@ -1461,18 +1461,21 @@ label { gap: 10px; font-size: 14px; margin: 24px 0; }
 }
 
 /* Keep the menu control available when the navigation is folded away. */
-.sidebar-toggle { position: fixed; z-index: 30; top: 8px; left: 188px; width: 36px; height: 32px; display: grid; place-items: center; border: 1px solid #555; background: var(--dark); color: white; border-radius: 4px; font-size: 26px; line-height: 1; cursor: pointer; }
-.sidebar-toggle:hover { background: #323232; }
+.sidebar-toggle { position: fixed; z-index: 30; top: 10px; left: 186px; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; background: transparent; color: #a8a9ad; border-radius: 8px; cursor: pointer; transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease; }
+.sidebar-toggle:hover { color: white; background: #ffffff0d; border-color: #ffffff1f; }
 .sidebar-toggle:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+.sidebar-collapsed > .sidebar-toggle { color: #65676c; background: white; border-color: #e5e5e7; }
+.sidebar-collapsed > .sidebar-toggle:hover { color: var(--ink); background: #f5f5f6; border-color: #c6c7ca; }
+.sidebar-toggle:active { transform: translateY(1px); }
 .workspace > .sidebar { transition: transform 160ms ease; }
 .sidebar-collapsed > .sidebar { transform: translateX(-100%); visibility: hidden; pointer-events: none; }
 .sidebar-collapsed > .workspace-body { margin-left: 0; }
-.sidebar-collapsed > .sidebar-toggle { left: 12px; }
-.sidebar-collapsed > .workspace-body > .main { padding-top: 56px; }
+.sidebar-collapsed > .sidebar-toggle { left: 28px; }
+.sidebar-collapsed > .workspace-body > .main { padding-top: 64px; }
 @media (max-width: 1180px) { .sidebar-toggle { left: 160px; } }
 @media (max-width: 960px) {
   .sidebar-toggle { position: absolute; left: auto; right: 12px; }
   .sidebar-collapsed > .sidebar { display: none; }
-  .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 12px; right: auto; }
+  .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 24px; right: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .workspace > .sidebar { transition: none; } }
