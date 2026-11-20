@@ -114,3 +114,11 @@ QR画像生成、SNS特典・追加チップ、景品、Push通知、オフラ�
 使い捨てのローカルDBで `TEST_URL=http://localhost:3001 TEST_ISOLATED=1 node --test tests/reentry.test.mjs` を実行し、経験者限定・料金・時間と席の維持・再送・一時停止・時間終了・名前固定を確認します。
 
 既存環境には `0013_reentry_settings.sql` の適用が必要です。料金の変更前に開いた確認画面からの記録は拒否し、再確認を求めます。
+
+## Cloudflare Pagesの自動デプロイ
+
+本番URLは https://utpoker-festival-reception.pages.dev/ です。`.github/workflows/deploy-pages.yml` が `main` へのpush時（および手動実行時）に型チェック、vinextビルド、Pages形式への変換、本番D1の未適用マイグレーション、既存Pagesプロジェクトへの公開を順に実行します。失敗時はGitHub Actionsのログを確認してください。デプロイは直列に実行します。
+
+初回のみ、GitHubリポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` を登録します。対象アカウント `c0aa39667f328632eae2c2c42d51564f` に対する **Cloudflare Pages: Edit** と **D1: Edit** の権限が必要です。ローカルWranglerのログイントークンは期限があるため、GitHubには登録しません。本番の `SETUP_KEY` と `STAFF_PASSWORD` は既存Pages設定で管理し、GitHubやソースコードへコピーしません。
+
+ローカルで公開用成果物だけを作る場合は `npm run build:pages` を使います。出力先は `dist/pages`、公開設定は `wrangler.pages.jsonc` です。この設定は既存の本番D1を参照します。`wrangler.local.jsonc` とローカルDBは自動デプロイでは使用しません。PagesにはCronトリガーがないため、既存の定期処理Workerはこのワークフローの更新対象に含みません。

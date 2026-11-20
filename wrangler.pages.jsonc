@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "utpoker-festival-reception",
+  "pages_build_output_dir": "dist/pages",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "utpoker-festival-reception",
+    "database_id": "85aa7d66-afed-435a-858d-d96c65b58e3b",
+    "migrations_dir": "drizzle"
+  }]
+}
