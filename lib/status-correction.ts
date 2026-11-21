@@ -10,7 +10,6 @@ export async function statusCorrection(ticket: Ticket, body: Record<string, unkn
   if (issue) throw new HttpError(409, issue);
   const moving = ticket.status === target && (target === 'seated' || target === 'playing') &&
     (body.table !== undefined || body.seat !== undefined);
-  if (moving && target === 'playing' && staff.role !== 'admin') throw new HttpError(403, 'プレイ中の席の変更は責任者が行ってください。');
   if (ticket.status === target && !moving) throw new HttpError(409, '現在と異なるステータスを選んでください。');
   if (body.reason !== undefined && (typeof body.reason !== 'string' || body.reason.length > 200)) throw new HttpError(400, '変更メモは200文字以内で入力してください。');
   const db = database();

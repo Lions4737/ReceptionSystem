@@ -121,7 +121,7 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
   const mustChooseSeat = needsSeat && (statusChanged || kindChanged || seatChanged);
   const sourceTable = data.tables.find(table => table.id === ticket.table_id);
   const canChooseSeat = statusChanged || status === 'seated' ||
-    (status === 'playing' && role === 'admin' && sourceTable?.paused_at === null);
+    (status === 'playing' && ['admin', 'reception', 'operator'].includes(role) && sourceTable?.paused_at === null);
   const available = data.tables.filter(t => t.kind === kind).flatMap(table =>
     Array.from({ length: table.seat_count }, (_, i) => ({ table, seat: i + 1 }))
   ).filter(s => {
