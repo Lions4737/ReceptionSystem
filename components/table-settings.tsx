@@ -119,10 +119,10 @@ export function TableSettings({ data, offline, onChange }: Props) {
       {offline && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
       {error && <p className="settings-error" role="alert">{error}</p>}
       {moving.completed ? <p role="status">全{moving.occupants.length}人の割り振りを変更しました。下の移動先へご案内ください。元の卓は割り振りロック中です。</p> :
-        <><p>同じ対象タグの他の卓へ全員を移動し、元の卓を割り振りロックします。入金・プレイ状況・残り時間を引き継ぎます。</p>
+        <><p>他の卓へ全員を移動し（同じ対象タグの卓を優先し、足りなければ別の対象タグの卓へ）、元の卓を割り振りロックします。入金・プレイ状況・残り時間を引き継ぎます。</p>
           <p className="form-help">移動する人数：{moving.occupants.length}人 ／ 移動先の空席：{moving.available}席<br/>ロック中の卓は移動先に含みません。</p>
           {!enoughSeats && <p className="settings-error" role="alert">{moving.occupants.length
-            ? `全員を移すにはあと${moving.occupants.length - moving.available}席必要です。同じ対象タグの卓を追加するか、席数やロックを調整してください。`
+            ? `全員を移すにはあと${moving.occupants.length - moving.available}席必要です。卓を追加するか、席数やロックを調整してください。`
             : 'この卓はすでに空です。'}</p>}
           {staleMoves && <p className="settings-error" role="alert">卓や席の状態が変わりました。移動先を更新して確認してください。</p>}
         </>}
@@ -146,7 +146,7 @@ export function TableSettings({ data, offline, onChange }: Props) {
         const locked = Boolean(table.assignment_locked);
         return <tr key={table.id}>
           <td><InlineTableValue table={table} field="name" disabled={rowDisabled} onChange={run}/></td>
-          <td><select className={`table-kind-tag ${table.kind}`} aria-label={`${table.name}の対象タグ`} value={table.kind} disabled={rowDisabled || occupancy > 0} title={occupancy ? '利用中の卓は対象タグを変更できません' : '対象タグを変更'}
+          <td><select className={`table-kind-tag ${table.kind}`} aria-label={`${table.name}の対象タグ`} value={table.kind} disabled={rowDisabled} title={occupancy ? '座っている方はそのまま続行し、以後の自動割り振りが新しい対象になります' : '対象タグを変更'}
             onChange={event => void run({ action: 'update', table: table.id, version: table.version, name: table.name, kind: event.target.value, seat_count: table.seat_count })}>{tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></td>
           <td><InlineTableValue table={table} field="seat_count" disabled={rowDisabled} onChange={run}/></td>
           <td>{occupancy ? `${occupancy}席 利用中` : '空席'}{table.paused_at ? '・一時停止中' : ''}</td>

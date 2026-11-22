@@ -174,7 +174,8 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     const table=await db.prepare("SELECT * FROM game_tables WHERE id=?").bind(text(b.table ?? t.table_id)).first<GameTable>();
     const seat=integer(b.seat ?? t.seat,1,table?.seat_count ?? 9);
     const keepsSeat=t.table_id===table?.id && t.seat===seat;
-    if(!table || table.archived_at!==null || table.kind!==t.kind || table.paused_at || (table.assignment_locked && !keepsSeat)) throw new HttpError(409,"ロック・一時停止されていない、対象の一致する卓を選んでください。");
+    // Manual seating may cross kinds (e.g. an expert sent to a beginner table); the ticket keeps its own kind.
+    if(!table || table.archived_at!==null || table.paused_at || (table.assignment_locked && !keepsSeat)) throw new HttpError(409,"ロック・一時停止されていない卓を選んでください。");
     correctionTable=table;
     changes={status:'seated',table_id:table.id,seat};
   } else if(action==='move-seat') {
@@ -231,14 +232,14 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   if(t.lecture_at!=null && action!=='lecture' && action!=='end-lecture' && ('status' in changes || 'kind' in changes || 'paid' in changes || 'table_id' in changes)) changes.lecture_at=null;
   const returnsToFront=t.status==='hold' && changes.status==='waiting';
   const final={...t,...changes,version:version+1,last_op:op,...(action==='reentry'?{reentry_chips:200,reentry_fee:payment}:{})};
-  const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND kind=? AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
+  const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
   const movingPlaying = action === 'set-status' && t.status === 'playing' && changes.status === undefined && changes.table_id !== undefined;
   const reentryGuard = action==='reentry' ? ' AND COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300)=?' : '';
   const sourceGuard = movingPlaying ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=tickets.table_id AND paused_at IS NULL AND archived_at IS NULL)' : '';
   const correctionGuard=correctionTable?' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND version=? AND archived_at IS NULL)':'';
   const checkNickname = active(final) && (!active(t) || final.nickname !== t.nickname);
   const nicknameGuard = checkNickname ? ` AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname} AND id<>?)` : '';
-  const args=[...Object.values(changes),version+1,op,id,version,...(action==='start' ? [t.table_id,t.kind,t.seat] : action==='move-seat' ? [t.table_id,changes.seat] : []),...(correctionTable?[correctionTable.id,correctionTable.version]:[])];
+  const args=[...Object.values(changes),version+1,op,id,version,...(action==='start' ? [t.table_id,t.seat] : action==='move-seat' ? [t.table_id,changes.seat] : []),...(correctionTable?[correctionTable.id,correctionTable.version]:[])];
   // Choose the front position in the write itself, so concurrent returns do not
   // share a stale queue position. Beginner and expert queues remain independent.
   const assignments=Object.keys(changes).map(k=>k==='queued_at' && returnsToFront

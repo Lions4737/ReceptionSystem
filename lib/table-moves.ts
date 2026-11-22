@@ -13,7 +13,7 @@ export interface TableMove {
 export function planTableMoves(source: GameTable, tables: GameTable[], tickets: Ticket[]) {
   const occupants = tickets.filter(t => t.table_id === source.id && assignedStatuses.includes(t.status))
     .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0) || a.id - b.id);
-  const destinations = tables.filter(t => t.id !== source.id && t.kind === source.kind &&
+  const destinations = tables.filter(t => t.id !== source.id &&
     t.archived_at === null && !t.assignment_locked).map(table => {
     const used = tickets.filter(t => t.table_id === table.id && assignedStatuses.includes(t.status));
     const seats = Array.from({ length: table.seat_count }, (_, i) => i + 1).filter(seat => !used.some(t => t.seat === seat));
@@ -23,8 +23,9 @@ export function planTableMoves(source: GameTable, tables: GameTable[], tickets: 
   const moves: TableMove[] = [];
   if (available >= occupants.length) {
     for (const ticket of occupants) {
+      // Prefer tables of the same kind; spill over to the other kind only when they are full.
       const destination = destinations.filter(t => t.seats.length).sort((a, b) =>
-        a.count - b.count || a.table.id.length - b.table.id.length || a.table.id.localeCompare(b.table.id))[0];
+        Number(a.table.kind !== source.kind) - Number(b.table.kind !== source.kind) || a.count - b.count || a.table.id.length - b.table.id.length || a.table.id.localeCompare(b.table.id))[0];
       moves.push({ ticket_id: ticket.id, ticket_version: ticket.version,
         table_id: destination.table.id, table_version: destination.table.version, seat: destination.seats.shift()! });
       destination.count++;

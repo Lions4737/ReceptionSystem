@@ -24,7 +24,7 @@ export async function statusCorrection(ticket: Ticket, body: Record<string, unkn
     if (typeof body.table !== 'string' || !body.table) throw new HttpError(400, '案内するテーブルを選んでください。');
     table = await db.prepare('SELECT * FROM game_tables WHERE id=? AND archived_at IS NULL').bind(body.table).first<GameTable>();
     const keepsSeat = !!table && assignedStatuses.includes(ticket.status) && ticket.table_id === table.id && ticket.seat === body.seat;
-    if (!table || table.kind !== ticket.kind || (table.paused_at !== null && !(target === 'seated' && keepsSeat))) throw new HttpError(409, '対象が一致し、一時停止していないテーブルを選んでください。');
+    if (!table || (table.paused_at !== null && !(target === 'seated' && keepsSeat))) throw new HttpError(409, '一時停止していないテーブルを選んでください。');
     if (moving && keepsSeat) throw new HttpError(409, '別の席を選んでください。');
     if (moving && target === 'playing' && !await db.prepare('SELECT id FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL').bind(ticket.table_id).first()) {
       throw new HttpError(409, '移動元のテーブルを再開してから席を変更してください。');

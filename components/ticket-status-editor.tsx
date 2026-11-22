@@ -122,7 +122,8 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
   const sourceTable = data.tables.find(table => table.id === ticket.table_id);
   const canChooseSeat = statusChanged || status === 'seated' ||
     (status === 'playing' && ['admin', 'reception', 'operator'].includes(role) && sourceTable?.paused_at === null);
-  const available = data.tables.filter(t => t.kind === kind).flatMap(table =>
+  // Same-kind tables first; other-kind tables are allowed for manual moves.
+  const available = [...data.tables].sort((a, b) => Number(a.kind !== kind) - Number(b.kind !== kind)).flatMap(table =>
     Array.from({ length: table.seat_count }, (_, i) => ({ table, seat: i + 1 }))
   ).filter(s => {
     const keepsSeat = assignedStatuses.includes(ticket.status) && ticket.table_id === s.table.id && ticket.seat === s.seat;
@@ -168,7 +169,7 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       }
     }}/>
     {needsSeat && <label>テーブル・席<select value={validSeat ? seat : ''} required={mustChooseSeat} disabled={busy || !canChooseSeat} onChange={event => setSeat(event.target.value)}>
-      <option value="">席を選択してください</option>{available.map(s => <option key={`${s.table.id}:${s.seat}`} value={`${s.table.id}:${s.seat}`}>{s.table.name} · {s.seat}番席</option>)}
+      <option value="">席を選択してください</option>{available.map(s => <option key={`${s.table.id}:${s.seat}`} value={`${s.table.id}:${s.seat}`}>{s.table.name} · {s.seat}番席{s.table.kind !== kind ? `（${targetTags(data).find(tag => tag.id === s.table.kind)?.name ?? s.table.kind}卓）` : ''}</option>)}
     </select></label>}
     {status === 'finished' && status !== ticket.status && <label>最終チップ数<input name="score" type="number" min={0} max={10000000} step={1} placeholder="未入力で記録なし" disabled={busy}/></label>}
     {(error || selectedIssue || stale || offline) && <p className="settings-error" role="alert">{selectedIssue || error || (stale ? '他の操作で更新されました。一度閉じて、最新の受付から開き直してください。' : '接続を確認してから変更してください。')}</p>}

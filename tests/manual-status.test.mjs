@@ -70,7 +70,8 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     const expert = (await admin('table-config',{action:'create',name:'種別変更テスト卓',kind:'expert',seat_count:2})).data.table;
     assert.equal((await change('playing',{table,seat:2})).status,200);
     assert.equal((await change('playing',{kind:'expert'})).status,409);
-    assert.equal((await change('playing',{kind:'expert',table,seat:1})).status,409);
+    // Cross-kind seating is allowed; the ticket keeps its own kind.
+    assert.equal((await change('playing',{kind:'expert',table,seat:1})).status,200);
     assert.equal((await change('playing',{kind:'expert',table:expert,seat:1})).status,200);
     const moved = await current();
     assert.equal(moved.kind,'expert');
