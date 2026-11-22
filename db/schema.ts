@@ -32,7 +32,7 @@ export const tickets = sqliteTable("tickets", {
   createdAt: integer("created_at").notNull(), calledAt: integer("called_at"),
   tableId: text("table_id").references(() => tables.id), seat: integer("seat"),
   paid: integer("paid").notNull().default(0), fee: integer("fee").notNull(), minutes: integer("minutes").notNull(),
-  initialChips: integer("initial_chips").notNull(), finalChips: integer("final_chips"),
+  initialChips: integer("initial_chips").notNull(), finalChips: integer("final_chips"), lectureAt: integer("lecture_at"),
   startedAt: integer("started_at"), endsAt: integer("ends_at"), finishedAt: integer("finished_at"),
   pausedMs: integer("paused_ms").notNull().default(0), version: integer("version").notNull().default(0),
   lastOp: text("last_op").notNull(),

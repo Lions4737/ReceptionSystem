@@ -9,7 +9,7 @@ export interface Ticket {
   id: number; daily_number: number; player_id: string; day: string; nickname: string; kind: Kind; status: Status;
   queued_at: number; created_at: number; called_at: number | null; table_id: string | null; seat: number | null;
   reentry_count?: number;
-  paid: number; fee: number; minutes: number; initial_chips: number; final_chips: number | null;
+  paid: number; fee: number; minutes: number; initial_chips: number; final_chips: number | null; lecture_at?: number | null;
   started_at: number | null; ends_at: number | null; finished_at: number | null; paused_ms: number; version: number; last_op: string;
 }
 export interface GameTable { id: string; name: string; kind: Kind; seat_count: number; assignment_locked: number; archived_at: number | null; paused_at: number | null; version: number }
@@ -41,6 +41,10 @@ export const acceptsKind = (data: Snapshot, kind: Kind) => Boolean(targetTags(da
 export const kindLabel = (kind: Kind, tags: TargetTag[] = DEFAULT_TAGS) => tags.find(t=>t.id===kind)?.name ?? kind;
 export const code = (ticket: Pick<Ticket,"daily_number"|"kind">) => `${ticket.kind === "beginner" ? "B" : ticket.kind === "expert" ? "E" : "T"}-${String(ticket.daily_number).padStart(3,"0")}`;
 export const statusLabel: Record<Status,string> = { waiting:"待機中",called:"呼び出し中",seated:"着席・開始待ち",playing:"プレイ中",finished:"終了",hold:"不在・保留",cancelled:"キャンセル" };
+/** Paid, called beginner attending the lecture before seat assignment. */
+export const inLecture = (t: Pick<Ticket,'status'|'paid'|'lecture_at'>) => t.status === 'called' && !!t.paid && t.lecture_at != null;
+export const ticketStatusLabel = (t: Pick<Ticket,'status'|'paid'|'lecture_at'>) => inLecture(t) ? '初心者講習中' : statusLabel[t.status];
+export const ticketStatusClass = (t: Pick<Ticket,'status'|'paid'|'lecture_at'>) => inLecture(t) ? 'lecture' : t.status;
 export const active = (t: Ticket) => !["finished","cancelled"].includes(t.status);
 export function remaining(ticket: Ticket, now: number, table?: GameTable) {
   return ticket.ends_at === null ? ticket.minutes * 60_000 : ticket.ends_at - (table?.paused_at ?? now);

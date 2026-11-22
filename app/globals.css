@@ -1479,3 +1479,5 @@ label { gap: 10px; font-size: 14px; margin: 24px 0; }
   .sidebar-collapsed > .sidebar-toggle { position: fixed; left: 0; right: auto; top: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { .workspace > .sidebar { transition: none; } }
+:is(.reception-table, .status-picker) .pill.lecture { color: #0f6b73; background: #e6f6f7; border-color: #9fd3d8; }
+.pill.lecture { border-color: #0f6b73; color: #0f6b73; background: white; }

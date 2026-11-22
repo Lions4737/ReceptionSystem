@@ -33,7 +33,7 @@ export async function autoSeatTicket(ticket: Ticket, staff: Session, op: string,
       WHERE table_id=(SELECT table_id FROM selected_table)
       ORDER BY seat IN (1,9), abs(next_balance), random() LIMIT 1
     )
-    UPDATE tickets SET status='seated',
+    UPDATE tickets SET status='seated',lecture_at=NULL,
       table_id=(SELECT table_id FROM allocation),seat=(SELECT seat FROM allocation),
       version=version+1,last_op=?
     WHERE id=? AND version=? AND status='called' AND paid=1 AND EXISTS(SELECT 1 FROM allocation)`)

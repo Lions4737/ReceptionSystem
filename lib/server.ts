@@ -60,7 +60,7 @@ async function snapshot(request:Request,scope:string) {
     const ahead=current ? tickets.filter(t=>t.kind===current.kind && t.status==='waiting' && (t.queued_at<current.queued_at || (t.queued_at===current.queued_at && t.id<current.id))).length : 0;
     return response({...base,me,tickets:mine,position:ahead+1,mineWaitMinutes:current ? estimateWait(current.kind,tables,tickets,now,settings.minutes,ahead) : null});
   }
-  return response({...base,me:null,tickets:[],called:scope==='display' ? tickets.filter(t=>t.status==='called').map(t=>({code:code(t),table_id:t.table_id,seat:t.seat})) : []});
+  return response({...base,me:null,tickets:[],called:scope==='display' ? tickets.filter(t=>t.status==='called'&&t.lecture_at==null).map(t=>({code:code(t),table_id:t.table_id,seat:t.seat})) : []});
 }
 async function login(request:Request,b:Record<string,unknown>) {
   await withEvent('', () => throttle(request));
@@ -160,6 +160,14 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   } else if(action==='pay') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"すでに入金済みです。");
     changes={paid:1,table_id:null,seat:null}; payment=t.fee; paymentType='payment:' + op;
+  } else if(action==='lecture') {
+    requireRole(s,['admin','reception','operator']); state(['called']);
+    if(!t.paid || t.kind!=='beginner' || t.table_id!==null || t.lecture_at!=null) throw new HttpError(409,"入金済みで席が未割り振りの初心者のみ講習中にできます。");
+    changes={lecture_at:now};
+  } else if(action==='end-lecture') {
+    requireRole(s,['admin','reception','operator']); state(['called']);
+    if(t.lecture_at==null) throw new HttpError(409,"講習中ではありません。");
+    changes={lecture_at:null};
   } else if(action==='seat') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(!t.paid) throw new HttpError(409,"先に支払いを登録してください。");
     if (b.auto === true || (b.table === undefined && t.table_id === null)) return await autoSeatTicket(t, s, op, now);
@@ -219,6 +227,8 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     requireRole(s,['admin']); state(['called','seated']); if(!t.paid) throw new HttpError(409,"入金がありません。"); text(b.reason,200);
     changes={status:'cancelled',paid:0,table_id:null,seat:null}; payment=-t.fee; paymentType='refund';
   } else throw new HttpError(400,"不明な操作です。");
+  // Any status/kind/payment change ends the lecture.
+  if(t.lecture_at!=null && action!=='lecture' && action!=='end-lecture' && ('status' in changes || 'kind' in changes || 'paid' in changes || 'table_id' in changes)) changes.lecture_at=null;
   const returnsToFront=t.status==='hold' && changes.status==='waiting';
   const final={...t,...changes,version:version+1,last_op:op,...(action==='reentry'?{reentry_chips:200,reentry_fee:payment}:{})};
   const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND kind=? AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
