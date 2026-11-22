@@ -37,7 +37,7 @@ export interface Snapshot {
     sales: {id:string;name:string;quantity:number;unit_price:number;created_at:number;voided_at:number|null}[];
   };
 }
-export const acceptsKind = (data: Snapshot, kind: Kind) => Boolean(targetTags(data).find(t=>t.id===kind)?.open && data.tables.some(t=>t.kind===kind));
+export const acceptsKind = (data: Snapshot, kind: Kind) => Boolean(targetTags(data).find(t=>t.id===kind)?.open);
 export const kindLabel = (kind: Kind, tags: TargetTag[] = DEFAULT_TAGS) => tags.find(t=>t.id===kind)?.name ?? kind;
 export const code = (ticket: Pick<Ticket,"daily_number"|"kind">) => `${ticket.kind === "beginner" ? "B" : ticket.kind === "expert" ? "E" : "T"}-${String(ticket.daily_number).padStart(3,"0")}`;
 export const statusLabel: Record<Status,string> = { waiting:"待機中",called:"呼び出し中",seated:"着席・開始待ち",playing:"プレイ中",finished:"終了",hold:"不在・保留",cancelled:"キャンセル" };
