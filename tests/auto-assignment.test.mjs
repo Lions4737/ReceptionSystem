@@ -78,7 +78,7 @@ test('呼び出し・入金では席を確保せず、入金後だけ席を割�
     let ticket=await mine(p);
     assert.equal(ticket.status,'called'); assert.equal(ticket.table_id,null); assert.equal(ticket.seat,null);
     assert.equal((await state(admin)).occupancy[table],0);
-    const called=(await admin('display')).data.called.find(t=>t.code.endsWith(String(ticket.id).padStart(3,'0')));
+    const called=(await admin('display')).data.called.find(t=>t.code.endsWith(String(ticket.daily_number).padStart(3,'0')));
     assert.equal(called.table_id,null); assert.equal(called.seat,null);
     for(const fields of [{auto:true},{table,seat:1}]) assert.equal((await change(admin,p,'seat',fields)).status,409);
     for(const status of ['seated','playing','finished']) assert.equal((await change(admin,p,'set-status',{status,table,seat:1,score:0})).status,409);

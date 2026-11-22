@@ -1,3 +1,4 @@
+import { dailyNumberSql } from './ticket-number';
 import { merchandiseAction, merchandiseSnapshot } from './merchandise';
 import { autoHoldStatements } from './auto-hold';
 import { baseDatabase, currentNamespace, database, staffPassword, withEvent } from "../db";
@@ -27,7 +28,7 @@ async function snapshot(request:Request,scope:string) {
     ...autoHoldStatements(db, now),
     db.prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()),
     db.prepare("SELECT * FROM game_tables ORDER BY length(id),id"),
-    db.prepare("SELECT *, (SELECT COUNT(*) FROM payments p WHERE p.ticket_id=tickets.id AND p.type LIKE 'reentry:%') AS reentry_count FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id").bind(day),
+    db.prepare(`SELECT *, ${dailyNumberSql} AS daily_number, (SELECT COUNT(*) FROM payments p WHERE p.ticket_id=tickets.id AND p.type LIKE 'reentry:%') AS reentry_count FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id`).bind(day),
   ]);
   const settings=settingsResult.results[0] as unknown as Settings;
   const allTables=tablesResult.results as unknown as GameTable[];
@@ -53,7 +54,7 @@ async function snapshot(request:Request,scope:string) {
   }
   if(scope==='me') {
     if(!me || me.role!=='player') return response({...base,me,tickets:[]});
-    const mine=await rows<Ticket>("SELECT * FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 20",me.user_id);
+    const mine=await rows<Ticket>(`SELECT *, ${dailyNumberSql} AS daily_number FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 20`,me.user_id);
     const current=mine.find(active);
     const ahead=current ? tickets.filter(t=>t.kind===current.kind && t.status==='waiting' && (t.queued_at<current.queued_at || (t.queued_at===current.queued_at && t.id<current.id))).length : 0;
     return response({...base,me,tickets:mine,position:ahead+1,mineWaitMinutes:current ? estimateWait(current.kind,tables,tickets,now,settings.minutes,ahead) : null});
@@ -278,9 +279,9 @@ async function settingsAction(request:Request,b:Record<string,unknown>) {
 }
 async function exportCsv(request:Request) {
   const s=await requireStaff(request); requireRole(s,['admin']);
-  const saved = await rows<{csv_row: string}>("SELECT csv_row FROM ticket_csv_backup ORDER BY ticket_id");
+  const saved = await rows<{csv_row: string; daily_number: number; kind: Ticket["kind"]}>(`SELECT csv_row, tickets.kind, ${dailyNumberSql} AS daily_number FROM ticket_csv_backup JOIN tickets ON tickets.id=ticket_id ORDER BY ticket_id`);
   const header = ['営業日','受付番号','ニックネーム','種別','状態','卓','席','入金済','料金','開始','予定終了','実際終了','初期チップ','最終チップ'];
-  const result = [header.map(label => '"' + label + '"').join(','), ...saved.map(row => row.csv_row)].join('\r\n');
+  const result = [header.map(label => '"' + label + '"').join(','), ...saved.map(row => row.csv_row.replace(/^("[^"]*",)"[^"]*"/, (_, day: string) => `${day}"${code(row)}"`))].join('\r\n');
   return new Response('\uFEFF'+result,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="festival.csv"','Cache-Control':'no-store'}});
 }
 export async function handleGet(request:Request) {
