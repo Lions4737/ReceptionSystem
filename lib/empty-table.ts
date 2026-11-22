@@ -17,7 +17,7 @@ export async function emptyTable(source: GameTable, body: Record<string, unknown
   const plan = planTableMoves(source, tables, tickets);
   if (!plan.occupants.length) throw new HttpError(409, 'この卓はすでに空です。');
   if (plan.available < plan.occupants.length) throw new HttpError(409,
-    `同じ対象タグの他の卓に空席が${plan.available}席しかありません。あと${plan.occupants.length - plan.available}席必要です。ロック中の卓は移動先に含みません。`);
+    `他の卓に空席が${plan.available}席しかありません。あと${plan.occupants.length - plan.available}席必要です。ロック中の卓は移動先に含みません。`);
   const requested = body.moves;
   if (!Array.isArray(requested) || requested.length !== plan.moves.length || plan.moves.some((move, i) => {
     const value = requested[i];
@@ -50,7 +50,7 @@ export async function emptyTable(source: GameTable, body: Record<string, unknown
           WHERE NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id=json_extract(m.value,'$.ticket_id')
             AND t.version=json_extract(m.value,'$.ticket_version') AND t.table_id=game_tables.id AND t.${occupied})
           OR NOT EXISTS (SELECT 1 FROM game_tables dest WHERE dest.id=json_extract(m.value,'$.table_id')
-            AND dest.version=json_extract(m.value,'$.table_version') AND dest.kind=game_tables.kind
+            AND dest.version=json_extract(m.value,'$.table_version')
             AND dest.archived_at IS NULL AND dest.assignment_locked=0
             AND json_extract(m.value,'$.seat') BETWEEN 1 AND dest.seat_count)
           OR EXISTS (SELECT 1 FROM tickets used WHERE used.table_id=json_extract(m.value,'$.table_id')

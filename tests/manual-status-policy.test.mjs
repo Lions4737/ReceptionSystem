@@ -10,14 +10,20 @@ test('受付・運営スタッフもプレイ中と終了をまたいで修正�
   assert.equal(manualStatusIssue(ticket,target,role),null);
   assert.ok(manualStatusWarning(ticket,target));
  }
- assert.match(manualStatusWarning(ticket,'waiting'),/未入金.*差し引き/);
+ assert.doesNotMatch(manualStatusWarning(ticket,'waiting'),/未入金|差し引き/);
  assert.match(manualStatusWarning({...ticket,status:'finished'},'playing'),/最終チップ数.*消去.*30分/);
  assert.ok(manualStatusWarning(ticket,'playing'));
 });
 test('入金をまたぐ変更に入金状態と警告が連動する',()=>{
  assert.equal(manualStatusIssue({...ticket,paid:0,status:'waiting'},'playing','operator'),null);
  assert.equal(manualStatusIssue(ticket,'cancelled','admin'),null);
- for(const target of ['waiting','called','hold','cancelled']) assert.equal(manualStatusPaid(ticket,target),0);
+ for(const target of ['waiting','called','hold']) {
+  assert.equal(manualStatusPaid(ticket,target),1);
+  assert.equal(manualStatusPaid({...ticket,paid:0},target),0);
+  assert.doesNotMatch(manualStatusWarning(ticket,target),/加算|差し引き/);
+ }
+ assert.equal(manualStatusPaid(ticket,'cancelled'),0);
+ assert.match(manualStatusWarning({...ticket,fee:500},'cancelled'),/500円.*差し引き/);
  for(const target of ['seated','playing','finished']) assert.equal(manualStatusPaid({...ticket,status:'waiting',paid:0},target),1);
  assert.equal(manualStatusPaid({...ticket,status:'called'},'called'),1);
  assert.match(manualStatusWarning({...ticket,status:'waiting',paid:0,fee:500},'playing'),/500円.*加算/);

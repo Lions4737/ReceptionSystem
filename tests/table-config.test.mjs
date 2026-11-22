@@ -70,7 +70,9 @@ test('テーブルの追加・編集・削除・復元、動的な座席上限�
     assert.equal((await ticketAction(admin, player, 'seat', {table:id,seat:3})).status, 400);
     assert.equal((await ticketAction(admin, player, 'seat', {table:id,seat:2})).status, 200);
     assert.equal((await configure(admin, id, 'archive')).status, 409);
-    assert.equal((await configure(admin, id, 'update', {name:'変更した卓',kind:'expert',seat_count:2})).status, 409);
+    // Kind may change while occupied; the seated guest keeps playing.
+    assert.equal((await configure(admin, id, 'update', {name:'変更した卓',kind:'expert',seat_count:2})).status, 200);
+    assert.equal((await configure(admin, id, 'update', {name:'変更した卓',kind:'beginner',seat_count:2})).status, 200);
     assert.equal((await configure(admin, id, 'update', {name:'変更した卓',kind:'beginner',seat_count:1})).status, 409);
     assert.equal((await configure(admin, id, 'update', {name:'拡張した卓',kind:'beginner',seat_count:4})).status, 200);
     assert.equal((await ticketAction(dealer, player, 'start')).status, 200);

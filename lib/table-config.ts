@@ -56,11 +56,11 @@ export async function configureTable(request: Request, body: Record<string, unkn
     statement = db.prepare('INSERT INTO game_tables(id,name,kind,seat_count,last_op) VALUES(?,?,?,?,?)').bind(id, name, kind, seats, op);
   } else if (action === 'update') {
     // Recheck seat reservations in the same write: a concurrent call must not
-    // place a guest on a seat that is being removed or change their table kind.
+    // place a guest on a seat that is being removed. Kind may change while occupied.
     statement = db.prepare(`UPDATE game_tables SET name=?,kind=?,seat_count=?,version=version+1,last_op=?
       WHERE id=? AND version=? AND archived_at IS NULL
-      AND NOT EXISTS(SELECT 1 FROM tickets WHERE table_id=game_tables.id AND ${occupied} AND (seat>? OR game_tables.kind<>?))`)
-      .bind(name, kind, seats, op, id, before!.version, seats, kind);
+      AND NOT EXISTS(SELECT 1 FROM tickets WHERE table_id=game_tables.id AND ${occupied} AND seat>?)`)
+      .bind(name, kind, seats, op, id, before!.version, seats);
   } else if (action === 'lock') {
     statement = db.prepare('UPDATE game_tables SET assignment_locked=?,version=version+1,last_op=? WHERE id=? AND version=? AND archived_at IS NULL')
       .bind(Number(body.locked), op, id, before!.version);

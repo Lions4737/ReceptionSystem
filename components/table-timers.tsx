@@ -138,7 +138,7 @@ export function TableTimers({ id, data, now, busy, error, message, onStart, onFi
           {ticket && <div className={styles.controls}>
             {playing && table.kind==='expert' && ticket.kind==='expert' && authorized && <button type="button" disabled={disabled || expired} onClick={()=>onReentry(ticket)}>リエントリー · ¥{data.settings.reentry_fee.toLocaleString()}</button>}
             {!playing && <button type="button" disabled={disabled || !authorized || ticket.status !== 'seated' || paused} onClick={() => onStart(ticket)}>▶ 開始</button>}
-            {playing && <button type="button" disabled={disabled || !authorized} onClick={() => onFinish(ticket)}>終了・点数入力</button>}
+            {playing && <button type="button" disabled={disabled || !authorized} onClick={() => onFinish(ticket)}>終了</button>}
           </div>}
         </article>;
       })}
@@ -158,7 +158,7 @@ export function TableTimers({ id, data, now, busy, error, message, onStart, onFi
         <div className={styles.identity}><b>{code(ticket)}</b><span>{ticket.nickname}</span></div>
         <Countdown milliseconds={milliseconds}/>
         {playing && paused && !expired && <p className={styles.caption}>再開するまで時間は進みません</p>}
-        <div className={styles.controls}><button type="button" tabIndex={-1}>{playing ? '終了・点数入力' : '▶ 開始'}</button></div>
+        <div className={styles.controls}><button type="button" tabIndex={-1}>{playing ? '終了' : '▶ 開始'}</button></div>
       </div>;
     })()}
   </section>;

@@ -22,7 +22,7 @@ async function setup() {
   assert.equal(created.status,201);
   const table = created.data.table;
   await player('identity',{});
-  assert.equal((await player('join',{nickname:'とても長い名前の表示とステータス変更を確認するためのゲスト',kind:'beginner'})).status,201);
+  assert.equal((await player('join',{nickname:'ステータス検証-'+crypto.randomUUID().slice(0,8),kind:'beginner'})).status,201);
   const id = (await player('me')).data.tickets[0].id;
   const current = async () => (await player('me')).data.tickets.find(t=>t.id===id);
   const change = async (status, extra={}, actor=admin) => actor('action',{scope:'staff',action:'set-status',id,version:(await current()).version,status,...extra});
@@ -43,7 +43,7 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     let ticket = await current(); assert.equal(ticket.table_id,null); assert.equal(ticket.seat,null);
     assert.equal((await change('waiting')).status,200);
     assert.equal((await change('called',{table,seat:1})).status,200);
-    assert.ok((await admin('public')).data.called.some(t=>t.code.endsWith(String(id).padStart(3,'0'))&&t.table_id===null&&t.seat===null));
+    assert.ok((await admin('display')).data.called.some(t=>t.code.endsWith(String(id).padStart(3,'0'))&&t.table_id===null&&t.seat===null));
     // Manual correction can mark someone absent immediately, unlike the 3-minute normal action.
     assert.equal((await change('hold',{reason:'呼び出しを誤って操作'})).status,200);
     assert.equal((await admin('public')).data.occupancy[table],0);
@@ -51,8 +51,9 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     assert.equal((await action('pay')).status,200);
     const revenue = (await admin('staff')).data.revenue;
     for(const status of ['waiting','hold','called']) assert.equal((await change(status)).status,200);
-    assert.equal((await current()).paid,0);
-    assert.equal((await action('pay')).status,200);
+    assert.equal((await current()).paid,1);
+    assert.equal((await action('pay')).status,409);
+    assert.equal((await admin('staff')).data.revenue,revenue);
     assert.equal((await change('seated',{table,seat:1})).status,200);
     assert.equal((await change('playing',{table,seat:1})).status,200);
     ticket=await current(); assert.equal(ticket.ends_at-ticket.started_at,ticket.minutes*60000);
@@ -69,8 +70,13 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     assert.deepEqual(renamed, {...started, nickname:'修正した名前', version:started.version+1, last_op:renamed.last_op});
     const expert = (await admin('table-config',{action:'create',name:'種別変更テスト卓',kind:'expert',seat_count:2})).data.table;
     assert.equal((await change('playing',{table,seat:2})).status,200);
-    assert.equal((await change('playing',{kind:'expert'})).status,409);
-    assert.equal((await change('playing',{kind:'expert',table,seat:1})).status,409);
+    const beforeKindChange=await current();
+    assert.equal((await change('playing',{kind:'expert'})).status,200);
+    const afterKindChange=await current();
+    for(const field of ['table_id','seat','started_at','ends_at','paid']) assert.equal(afterKindChange[field],beforeKindChange[field]);
+    assert.equal((await change('playing',{kind:'beginner'})).status,200);
+    // Cross-kind seating is allowed; the ticket keeps its own kind.
+    assert.equal((await change('playing',{kind:'expert',table,seat:1})).status,200);
     assert.equal((await change('playing',{kind:'expert',table:expert,seat:1})).status,200);
     const moved = await current();
     assert.equal(moved.kind,'expert');
@@ -83,7 +89,6 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     const expertTable = (await admin('staff')).data.tables.find(t=>t.id===expert);
     assert.equal((await admin('table-config',{action:'archive',table:expert,version:expertTable.version})).status,200);
     assert.equal((await change('finished',{score:-1})).status,400);
-    assert.equal((await change('finished')).status,400);
     assert.equal((await change('finished',{nickname:'最終結果の名前',score:0,reason:'終了に修正'})).status,200);
     ticket=await current(); assert.equal(ticket.final_chips,0); assert.equal(ticket.paid,1);
     assert.equal(ticket.nickname,'最終結果の名前');
@@ -102,6 +107,7 @@ test('手動変更で席・タイマー・結果を更新し、会計と操作�
     state=await getTable();
     assert.equal((await admin('table',{table,version:state.version})).status,200);
     assert.equal((await change('playing',{table,seat:2})).status,200);
+    ticket=await current();
     state=await getTable();
     assert.equal((await admin('table',{table,version:state.version})).status,200);
     assert.equal((await action('adjust-time',{seconds:0})).status,200);
@@ -146,7 +152,7 @@ test('手動変更でも権限・席競合・古い更新・返金済み受付�
     ]);
     assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
     if((await current()).status!=='called') assert.equal((await change('called',{table,seat:1})).status,200);
-    await other('identity',{}); await other('join',{kind:'beginner'});
+    await other('identity',{}); assert.equal((await other('join',{nickname:'競合検証-'+crypto.randomUUID().slice(0,8),kind:'beginner'})).status,201);
     assert.equal((await action('pay')).status,200);
     assert.equal((await change('seated',{table,seat:1},reception)).status,200);
     const secondAction=async(action,fields={})=>{const t=(await other('me')).data.tickets[0];return admin('action',{scope:'staff',action,id:t.id,version:t.version,...fields});};
@@ -160,7 +166,7 @@ test('手動変更でも権限・席競合・古い更新・返金済み受付�
     assert.equal((await change('waiting')).status,409);
     assert.equal((await current()).status,'cancelled');
     assert.equal((await secondAction('refund',{reason:'テスト終了'})).status,200);
-    assert.equal((await other('join',{kind:'beginner'})).status,201);
+    assert.equal((await other('join',{nickname:'競合検証の再参加',kind:'beginner'})).status,201);
     assert.equal((await secondAction('set-status',{status:'cancelled'})).status,200);
     let last=(await other('me')).data.tickets[0];
     assert.equal((await admin('action',{scope:'staff',action:'set-status',id:last.id,version:last.version,status:'waiting'})).status,200);

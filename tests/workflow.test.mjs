@@ -44,8 +44,10 @@ test('受付→会計→個人計時→点数確定、権限・二重入金・�
  assert.equal((await staff('table',{table:'B',version:table.version})).status,200);
  table=(await staff('staff')).data.tables.find(t=>t.id==='B');assert.ok(table.paused_at);
  assert.equal((await staff('table',{table:'B',version:table.version})).status,200);
- assert.equal((await change('finish',{score:0})).status,200);
- mine=(await player('me')).data.tickets[0];assert.equal(mine.status,'finished');assert.equal(mine.final_chips,0);
+ assert.equal((await change('finish')).status,200);
+ mine=(await player('me')).data.tickets[0];assert.equal(mine.status,'finished');assert.equal(mine.final_chips,null);
+ assert.equal((await staff('action',{action:'correct',id:mine.id,version:mine.version,score:0,reason:'点数を後から記録'})).status,200);
+ mine=(await player('me')).data.tickets[0];assert.equal(mine.final_chips,0);
  const invite=(await staff('invite',{role:'dealer',table:'A'})).data.key;
  const dealer=client();assert.equal((await dealer('login',{key:invite})).status,200);assert.equal((await client()('login',{key:invite})).status,401);
  assert.equal((await dealer('settings',{fee:500,minutes:30,chips:1000,beginner_open:true,expert_open:true})).status,403);

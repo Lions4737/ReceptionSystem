@@ -2,7 +2,7 @@
 
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { assignedStatuses, manualStatuses, manualStatusIssue, manualStatusWarning } from '../lib/manual-status';
-import { statusLabel, targetTags, type Kind, type Role, type Snapshot, type Status, type Ticket } from '../lib/types';
+import { scoreValue, statusLabel, targetTags, type Kind, type Role, type Snapshot, type Status, type Ticket } from '../lib/types';
 
 type Props = {
   ticket: Ticket; data: Snapshot; busy: boolean; error: string; offline: boolean;
@@ -24,7 +24,7 @@ function StatusPicker({ value, ticket, role, disabled, onChange }: {
     called: '会場モニターで呼び出し',
     seated: '選んだ席で開始待ち',
     playing: `${ticket.minutes}分の計時を開始`,
-    finished: '点数を確定して席を解放',
+    finished: '終了して席を解放',
     hold: '席を解放して保留',
     cancelled: '受付を取り消す',
   };
@@ -122,7 +122,8 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
   const sourceTable = data.tables.find(table => table.id === ticket.table_id);
   const canChooseSeat = statusChanged || status === 'seated' ||
     (status === 'playing' && ['admin', 'reception', 'operator'].includes(role) && sourceTable?.paused_at === null);
-  const available = data.tables.filter(t => t.kind === kind).flatMap(table =>
+  // Same-kind tables first; other-kind tables are allowed for manual moves.
+  const available = [...data.tables].sort((a, b) => Number(a.kind !== kind) - Number(b.kind !== kind)).flatMap(table =>
     Array.from({ length: table.seat_count }, (_, i) => ({ table, seat: i + 1 }))
   ).filter(s => {
     const keepsSeat = assignedStatuses.includes(ticket.status) && ticket.table_id === s.table.id && ticket.seat === s.seat;
@@ -145,7 +146,7 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       ...(nicknameChanged ? { nickname: nickname.trim() } : {}),
       ...(kindChanged ? { kind } : {}),
       ...(mustChooseSeat ? { table, seat: Number(number) } : {}),
-      ...(statusChanged && status === 'finished' ? { score: Number(form.get('score')) } : {}) });
+      ...(statusChanged && status === 'finished' ? { score: scoreValue(form.get('score')) } : {}) });
   }}>
     <label className="status-editor-player">プレイヤーネーム
       <input value={nickname} onChange={event => setNickname(event.target.value)} maxLength={30} required disabled={busy}/>
@@ -157,7 +158,6 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       <select aria-label="種別" aria-describedby={noAvailableSeats ? seatWarningId : undefined} value={kind} disabled={busy || (needsSeat && !canChooseSeat)} onChange={event => {
       const next = event.target.value as Kind;
       setKind(next);
-      setSeat(next === ticket.kind ? originalSeat : '');
     }}>
       {targetTags(data).map(tag => <option key={tag.id} value={tag.id}>{tag.name}（{tag.id === 'beginner' ? 'B' : 'E'}）</option>)}
     </select></label>
@@ -168,9 +168,9 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       }
     }}/>
     {needsSeat && <label>テーブル・席<select value={validSeat ? seat : ''} required={mustChooseSeat} disabled={busy || !canChooseSeat} onChange={event => setSeat(event.target.value)}>
-      <option value="">席を選択してください</option>{available.map(s => <option key={`${s.table.id}:${s.seat}`} value={`${s.table.id}:${s.seat}`}>{s.table.name} · {s.seat}番席</option>)}
+      <option value="">席を選択してください</option>{available.map(s => <option key={`${s.table.id}:${s.seat}`} value={`${s.table.id}:${s.seat}`}>{s.table.name} · {s.seat}番席{s.table.kind !== kind ? `（${targetTags(data).find(tag => tag.id === s.table.kind)?.name ?? s.table.kind}卓）` : ''}</option>)}
     </select></label>}
-    {status === 'finished' && status !== ticket.status && <label>最終チップ数<input name="score" type="number" min={0} max={10000000} step={1} required placeholder="例：1500" disabled={busy}/></label>}
+    {status === 'finished' && status !== ticket.status && <label>最終チップ数<input name="score" type="number" min={0} max={10000000} step={1} placeholder="未入力で記録なし" disabled={busy}/></label>}
     {(error || selectedIssue || stale || offline) && <p className="settings-error" role="alert">{selectedIssue || error || (stale ? '他の操作で更新されました。一度閉じて、最新の受付から開き直してください。' : '接続を確認してから変更してください。')}</p>}
     {<div className="status-change-warning" role="alert"><strong>ステータス変更の注意</strong><p>{warning}</p><label><input type="checkbox" checked={acknowledged} disabled={busy} onChange={event=>setAcknowledged(event.target.checked)}/>影響を確認して変更する</label></div>}
     <button className="button primary full" disabled={busy || offline || stale || (!!warning && !acknowledged) || !nickname.trim() || (!statusChanged && !nicknameChanged && !kindChanged && !seatChanged) || !!selectedIssue || (mustChooseSeat && (!canChooseSeat || !validSeat))}>{busy ? '変更中…' : '変更を保存'}</button>

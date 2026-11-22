@@ -1,4 +1,4 @@
-import { database } from '../db';
+import { currentNamespace, database } from '../db';
 import { HttpError, response } from './auth';
 import { MAX_TABLE_SEATS, type Session, type Ticket } from './types';
 
@@ -43,6 +43,9 @@ export async function autoSeatTicket(ticket: Ticket, staff: Session, op: string,
         json_object('status',status,'table_id',table_id,'seat',seat,'called_at',called_at,'version',version),?
       FROM tickets WHERE id=? AND last_op=?`)
       .bind(op, staff.user_id, JSON.stringify(ticket), now, ticket.id, op),
+    // Seating ends the beginner lecture (shared table, see drizzle/0014).
+    db.prepare('DELETE FROM ticket_lectures WHERE event_namespace=? AND ticket_id=? AND EXISTS(SELECT 1 FROM tickets WHERE id=? AND last_op=?)')
+      .bind(currentNamespace(), ticket.id, ticket.id, op),
   ]);
   if (!results[0].meta.changes) throw new HttpError(409, '左右の人数差の条件を満たす空席がないか、受付が更新されています。最新の状態を確認してください。');
   return response({ ok: true });

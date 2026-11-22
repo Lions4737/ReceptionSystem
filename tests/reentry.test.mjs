@@ -54,6 +54,10 @@ test('経験者卓の設定料金によるリエントリーと再参加時の�
  // Another visitor may have taken the old name while this player was finished.
  const other=client();await other(api+'identity',{});
  assert.equal((await other(api+'join',{nickname:'最初の名前',kind:'expert'})).status,201);
+ assert.equal((await player(api+'join',{nickname:'変えようとした名前',kind:'expert'})).status,409);
+ // The original name becomes available when the other visitor cancels.
+ const otherTicket=(await other(api+'me')).data.tickets[0];
+ assert.equal((await other(api+'action',{scope:'player',action:'cancel',id:otherTicket.id,version:otherTicket.version})).status,200);
  assert.equal((await player(api+'join',{nickname:'変えようとした名前',kind:'expert'})).status,201);
  assert.equal((await current()).nickname,'最初の名前');
  assert.notEqual((await current()).id,before.id);

@@ -98,8 +98,8 @@ export function TableSettings({ data, offline, onChange }: Props) {
       <button className="button primary" disabled={disabled || adding || !!removing} onClick={() => { setAdding(true); setError(''); }}>＋ テーブルを追加</button>
     </div>
     <p className="table-settings-summary">{data.tables.length}卓 <span>／</span> 合計 {totalSeats}席</p>
-    {offline && !moving && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
-    {error && !moving && <p className="settings-error" role="alert">{error}</p>}
+    {offline && !moving && !removing && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
+    {error && !moving && !removing && <p className="settings-error" role="alert">{error}</p>}
     <span className="sr-only" role="status">{busy ? '保存中です' : ''}</span>
     {adding && <form className="table-config-editor" onSubmit={async event => {
       event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -119,10 +119,10 @@ export function TableSettings({ data, offline, onChange }: Props) {
       {offline && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
       {error && <p className="settings-error" role="alert">{error}</p>}
       {moving.completed ? <p role="status">全{moving.occupants.length}人の割り振りを変更しました。下の移動先へご案内ください。元の卓は割り振りロック中です。</p> :
-        <><p>同じ対象タグの他の卓へ全員を移動し、元の卓を割り振りロックします。入金・プレイ状況・残り時間を引き継ぎます。</p>
+        <><p>他の卓へ全員を移動し（同じ対象タグの卓を優先し、足りなければ別の対象タグの卓へ）、元の卓を割り振りロックします。入金・プレイ状況・残り時間を引き継ぎます。</p>
           <p className="form-help">移動する人数：{moving.occupants.length}人 ／ 移動先の空席：{moving.available}席<br/>ロック中の卓は移動先に含みません。</p>
           {!enoughSeats && <p className="settings-error" role="alert">{moving.occupants.length
-            ? `全員を移すにはあと${moving.occupants.length - moving.available}席必要です。同じ対象タグの卓を追加するか、席数やロックを調整してください。`
+            ? `全員を移すにはあと${moving.occupants.length - moving.available}席必要です。卓を追加するか、席数やロックを調整してください。`
             : 'この卓はすでに空です。'}</p>}
           {staleMoves && <p className="settings-error" role="alert">卓や席の状態が変わりました。移動先を更新して確認してください。</p>}
         </>}
@@ -146,7 +146,7 @@ export function TableSettings({ data, offline, onChange }: Props) {
         const locked = Boolean(table.assignment_locked);
         return <tr key={table.id}>
           <td><InlineTableValue table={table} field="name" disabled={rowDisabled} onChange={run}/></td>
-          <td><select className={`table-kind-tag ${table.kind}`} aria-label={`${table.name}の対象タグ`} value={table.kind} disabled={rowDisabled || occupancy > 0} title={occupancy ? '利用中の卓は対象タグを変更できません' : '対象タグを変更'}
+          <td><select className={`table-kind-tag ${table.kind}`} aria-label={`${table.name}の対象タグ`} value={table.kind} disabled={rowDisabled} title={occupancy ? '座っている方はそのまま続行し、以後の自動割り振りが新しい対象になります' : '対象タグを変更'}
             onChange={event => void run({ action: 'update', table: table.id, version: table.version, name: table.name, kind: event.target.value, seat_count: table.seat_count })}>{tags.map(tag=><option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></td>
           <td><InlineTableValue table={table} field="seat_count" disabled={rowDisabled} onChange={run}/></td>
           <td>{occupancy ? `${occupancy}席 利用中` : '空席'}{table.paused_at ? '・一時停止中' : ''}</td>
@@ -157,9 +157,12 @@ export function TableSettings({ data, offline, onChange }: Props) {
       })}
     </tbody></table></div>
     {!data.tables.length && <div className="empty"><h3>テーブルを追加してください</h3><p>テーブルを用意すると、その対象の受付・席の割り当てができます。</p></div>}
-    {removing && <div className="table-config-editor" role="group" aria-label="テーブル削除の確認">
-      <h3>「{removing.name}」を削除しますか？</h3><p className="form-help">テーブルを一覧から削除します。過去の受付記録は残ります。</p>
-      <div className="table-config-actions"><button className="button danger" disabled={disabled} onClick={async () => { if (await run({ action: 'archive', table: removing.id, version: removing.version })) setRemoving(null); }}>テーブルを削除する</button><button className="button outline" disabled={busy} onClick={() => { setRemoving(null); setError(''); }}>キャンセル</button></div>
-    </div>}
+    {removing && <TableMoveDialog title={`「${removing.name}」を削除しますか？`} busy={busy} completed={false}
+      onClose={() => { if (!lock.current) { setRemoving(null); setError(''); } }}>
+      {offline && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
+      {error && <p className="settings-error" role="alert">{error}</p>}
+      <p className="form-help">テーブルを一覧から削除します。過去の受付記録は残ります。</p>
+      <div className="table-config-actions"><button className="button danger" disabled={disabled} onClick={async () => { if (await run({ action: 'archive', table: removing.id, version: removing.version })) setRemoving(null); }}>{busy ? '削除中…' : 'テーブルを削除する'}</button><button className="button outline" disabled={busy} onClick={() => { setRemoving(null); setError(''); }}>キャンセル</button></div>
+    </TableMoveDialog>}
   </section>;
 }

@@ -10,9 +10,12 @@ import { configureTable } from './table-config';
 import { statusCorrection } from './status-correction';
 import { autoSeatTicket } from './auto-assignment';
 const occupied = ['called','seated','playing'];
+// Lecture flags live in a shared table keyed by event namespace (see drizzle/0014).
+const lectureColumn = '(SELECT started_at FROM ticket_lectures l WHERE l.event_namespace=? AND l.ticket_id=tickets.id) AS lecture_at';
 const rows = async <T>(sql:string,...args:(string|number|null)[]) => (await database().prepare(sql).bind(...args).all<T>()).results;
 const getSettings = async () => (await database().prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()).first<Settings>())!;
 function integer(value:unknown,min:number,max:number) { if(typeof value!=="number" || !Number.isInteger(value) || value<min || value>max) throw new HttpError(400,"数値の入力を確認してください。"); return value; }
+function optionalScore(value:unknown) { return value==null ? null : integer(value,0,10000000); }
 function text(value:unknown,max=30) { if(typeof value!=="string" || !value.trim() || value.trim().length>max) throw new HttpError(400,"入力内容を確認してください。"); return value.trim(); }
 async function replay(op:string,s:Session) {
   const old=await database().prepare("SELECT actor FROM operations WHERE id=?").bind(op).first<{actor:string}>();
@@ -28,7 +31,7 @@ async function snapshot(request:Request,scope:string) {
     ...autoHoldStatements(db, now),
     db.prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()),
     db.prepare("SELECT * FROM game_tables ORDER BY length(id),id"),
-    db.prepare(`SELECT *, ${dailyNumberSql} AS daily_number, (SELECT COUNT(*) FROM payments p WHERE p.ticket_id=tickets.id AND p.type LIKE 'reentry:%') AS reentry_count FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id`).bind(day),
+    db.prepare(`SELECT *, ${dailyNumberSql} AS daily_number, (SELECT COUNT(*) FROM payments p WHERE p.ticket_id=tickets.id AND p.type LIKE 'reentry:%') AS reentry_count, ${lectureColumn} FROM tickets WHERE day=? OR status IN ('waiting','called','seated','playing','hold') ORDER BY queued_at,id`).bind(currentNamespace(),day),
   ]);
   const settings=settingsResult.results[0] as unknown as Settings;
   const allTables=tablesResult.results as unknown as GameTable[];
@@ -54,12 +57,12 @@ async function snapshot(request:Request,scope:string) {
   }
   if(scope==='me') {
     if(!me || me.role!=='player') return response({...base,me,tickets:[]});
-    const mine=await rows<Ticket>(`SELECT *, ${dailyNumberSql} AS daily_number FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 20`,me.user_id);
+    const mine=await rows<Ticket>(`SELECT *, ${dailyNumberSql} AS daily_number, ${lectureColumn} FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 20`,currentNamespace(),me.user_id);
     const current=mine.find(active);
     const ahead=current ? tickets.filter(t=>t.kind===current.kind && t.status==='waiting' && (t.queued_at<current.queued_at || (t.queued_at===current.queued_at && t.id<current.id))).length : 0;
     return response({...base,me,tickets:mine,position:ahead+1,mineWaitMinutes:current ? estimateWait(current.kind,tables,tickets,now,settings.minutes,ahead) : null});
   }
-  return response({...base,me:null,tickets:[],called:scope==='display' ? tickets.filter(t=>t.status==='called').map(t=>({code:code(t),table_id:t.table_id,seat:t.seat})) : []});
+  return response({...base,me:null,tickets:[],called:scope==='display' ? tickets.filter(t=>t.status==='called'&&t.lecture_at==null).map(t=>({code:code(t),table_id:t.table_id,seat:t.seat})) : []});
 }
 async function login(request:Request,b:Record<string,unknown>) {
   await withEvent('', () => throttle(request));
@@ -109,11 +112,16 @@ async function join(request:Request,b:Record<string,unknown>) {
   const previous = proxy ? null : await db.prepare('SELECT nickname FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 1').bind(s.user_id).first<{nickname:string}>();
   const nickname = previous?.nickname ?? text(b.nickname);
   const player=proxy ? 'proxy-'+crypto.randomUUID() : s.user_id;
-  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250 AND NOT EXISTS(SELECT 1 FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold')) ${previous ? '' : `AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname})`}`).bind(player,dayKey(now),nickname,kind,now,now,op,player,...(previous?[]:[nickname]));
+  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250 AND NOT EXISTS(SELECT 1 FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold')) AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname})`).bind(player,dayKey(now),nickname,kind,now,now,op,player,nickname);
   const results=await db.batch([insert,db.prepare("INSERT INTO operations(id,actor,action,ticket_id,created_at) SELECT ?,?,'join',id,? FROM tickets WHERE last_op=?").bind(op,s.user_id,now,op)]);
   if (!results[0].meta.changes) {
     if(await ownActive()) return response({ok:true},200);
-    if(!previous) await rejectDuplicateNickname(nickname);
+    // Returning visitors keep their previous nickname, so they cannot pick another one themselves.
+    if(previous) {
+      if(await db.prepare(`SELECT 1 FROM tickets WHERE ${activeNickname} LIMIT 1`).bind(nickname).first()) throw new HttpError(409, `前回と同じ名前「${nickname}」の方が受付中です。お手数ですが受付スタッフにお声がけください。`);
+    } else await rejectDuplicateNickname(nickname);
+    const activeCount=await db.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status IN ('waiting','called','seated','playing','hold')").first<{n:number}>();
+    if((activeCount?.n ?? 0)>=250) throw new HttpError(409, "ただいま受付が大変混み合っています（受付中が上限の250件に達しました）。しばらくしてから再度お試しください。");
     throw new HttpError(409, "現在この種別の受付を停止しています。");
   }
   return response({ok:true},201);
@@ -124,11 +132,12 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   if(!s) throw new HttpError(401,"ログインしてください。");
   const op=operationId(b); if(await replay(op,s)) return response({ok:true,replayed:true});
   const id=integer(b.id,1,10000000), version=integer(b.version,0,10000000);
-  const t=await db.prepare("SELECT * FROM tickets WHERE id=?").bind(id).first<Ticket>();
+  const t=await db.prepare(`SELECT *, ${lectureColumn} FROM tickets WHERE id=?`).bind(currentNamespace(),id).first<Ticket>();
   if(!t) throw new HttpError(404,"受付が見つかりません。");
+  const {lecture_at: _lecture, ...stored} = t; void _lecture;
   if(t.version!==version) throw new HttpError(409,"他の端末で更新されています。最新の状態を確認してください。");
   const action=text(b.action), now=Date.now(); let changes:Record<string,string|number|null>={}, payment=0, paymentType='';
-  let correctionTable: GameTable | null = null;
+  let correctionTable: GameTable | null = null, lecture: 'start' | 'clear' | null = null;
   if(s.role==='player') { if(t.player_id!==s.user_id || action!=='cancel') throw new HttpError(403,"この受付を変更できません。"); }
   else if(s.role==='dealer' && t.table_id!==s.table_id) throw new HttpError(403,"担当卓以外は操作できません。");
   const state=(allowed:string[])=>{if(!allowed.includes(t.status)) throw new HttpError(409,"現在の状態では実行できません。");};
@@ -140,7 +149,7 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     const kindChanged = kind !== t.kind;
     const needsNewSeat = kindChanged && (t.status === 'playing' || t.status === 'seated');
     if (b.status !== t.status || b.table !== undefined || b.seat !== undefined || needsNewSeat || (!kindChanged && nickname === t.nickname)) {
-      const correction = await statusCorrection({...t, kind},b,s,now);
+      const correction = await statusCorrection(t,b,s,now);
       changes = correction.changes;
       correctionTable = correction.table;
       if (changes.paid !== undefined && changes.paid !== t.paid) {
@@ -159,13 +168,22 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   } else if(action==='pay') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"すでに入金済みです。");
     changes={paid:1,table_id:null,seat:null}; payment=t.fee; paymentType='payment:' + op;
+  } else if(action==='lecture') {
+    requireRole(s,['admin','reception','operator']); state(['called']);
+    if(!t.paid || t.kind!=='beginner' || t.table_id!==null || t.lecture_at!=null) throw new HttpError(409,"入金済みで席が未割り振りの初心者のみ講習中にできます。");
+    lecture='start';
+  } else if(action==='end-lecture') {
+    requireRole(s,['admin','reception','operator']); state(['called']);
+    if(t.lecture_at==null) throw new HttpError(409,"講習中ではありません。");
+    lecture='clear';
   } else if(action==='seat') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(!t.paid) throw new HttpError(409,"先に支払いを登録してください。");
     if (b.auto === true || (b.table === undefined && t.table_id === null)) return await autoSeatTicket(t, s, op, now);
     const table=await db.prepare("SELECT * FROM game_tables WHERE id=?").bind(text(b.table ?? t.table_id)).first<GameTable>();
     const seat=integer(b.seat ?? t.seat,1,table?.seat_count ?? 9);
     const keepsSeat=t.table_id===table?.id && t.seat===seat;
-    if(!table || table.archived_at!==null || table.kind!==t.kind || table.paused_at || (table.assignment_locked && !keepsSeat)) throw new HttpError(409,"ロック・一時停止されていない、対象の一致する卓を選んでください。");
+    // Manual seating may cross kinds (e.g. an expert sent to a beginner table); the ticket keeps its own kind.
+    if(!table || table.archived_at!==null || table.paused_at || (table.assignment_locked && !keepsSeat)) throw new HttpError(409,"ロック・一時停止されていない卓を選んでください。");
     correctionTable=table;
     changes={status:'seated',table_id:table.id,seat};
   } else if(action==='move-seat') {
@@ -202,9 +220,9 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   } else if(action==='finish') {
     requireRole(s,['admin','dealer','operator']); state(['playing']);
     const table=await db.prepare("SELECT paused_at FROM game_tables WHERE id=?").bind(t.table_id).first<{paused_at:number|null}>();
-    changes={status:'finished',finished_at:now,final_chips:integer(b.score,0,10000000),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
+    changes={status:'finished',finished_at:now,final_chips:optionalScore(b.score),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
   } else if(action==='correct') {
-    requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:integer(b.score,0,10000000)};
+    requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:optionalScore(b.score)};
   } else if(action==='hold') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。");
     if(now-(t.called_at ?? now)<180000) throw new HttpError(409,"呼び出しから3分経過後に不在を確定できます。");
@@ -215,27 +233,31 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     if(s.role!=='player') requireRole(s,['admin','reception','operator']); state(['waiting','called','hold']);
     if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。"); changes={status:'cancelled',table_id:null,seat:null};
   } else if(action==='refund') {
-    requireRole(s,['admin']); state(['called','seated']); if(!t.paid) throw new HttpError(409,"入金がありません。"); text(b.reason,200);
+    requireRole(s,['admin']); state(['waiting','called','seated','hold']); if(!t.paid) throw new HttpError(409,"入金がありません。"); text(b.reason,200);
     changes={status:'cancelled',paid:0,table_id:null,seat:null}; payment=-t.fee; paymentType='refund';
   } else throw new HttpError(400,"不明な操作です。");
+  // Any status/kind/payment change ends the lecture.
+  if(t.lecture_at!=null && !lecture && ('status' in changes || 'kind' in changes || 'paid' in changes || 'table_id' in changes)) lecture='clear';
   const returnsToFront=t.status==='hold' && changes.status==='waiting';
-  const final={...t,...changes,version:version+1,last_op:op,...(action==='reentry'?{reentry_chips:200,reentry_fee:payment}:{})};
-  const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND kind=? AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
+  const final={...stored,...changes,...(lecture==='start'?{lecture_at:now}:{}),version:version+1,last_op:op,...(action==='reentry'?{reentry_chips:200,reentry_fee:payment}:{})};
+  const extra=action==='start' ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND paused_at IS NULL AND archived_at IS NULL AND seat_count>=?)' : action==='move-seat' ? " AND NOT EXISTS(SELECT 1 FROM tickets occupied WHERE occupied.table_id=? AND occupied.seat=? AND occupied.status IN ('called','seated','playing'))" : '';
   const movingPlaying = action === 'set-status' && t.status === 'playing' && changes.status === undefined && changes.table_id !== undefined;
   const reentryGuard = action==='reentry' ? ' AND COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300)=?' : '';
   const sourceGuard = movingPlaying ? ' AND EXISTS(SELECT 1 FROM game_tables WHERE id=tickets.table_id AND paused_at IS NULL AND archived_at IS NULL)' : '';
   const correctionGuard=correctionTable?' AND EXISTS(SELECT 1 FROM game_tables WHERE id=? AND version=? AND archived_at IS NULL)':'';
   const checkNickname = active(final) && (!active(t) || final.nickname !== t.nickname);
   const nicknameGuard = checkNickname ? ` AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname} AND id<>?)` : '';
-  const args=[...Object.values(changes),version+1,op,id,version,...(action==='start' ? [t.table_id,t.kind,t.seat] : action==='move-seat' ? [t.table_id,changes.seat] : []),...(correctionTable?[correctionTable.id,correctionTable.version]:[])];
+  const args=[...Object.values(changes),version+1,op,id,version,...(action==='start' ? [t.table_id,t.seat] : action==='move-seat' ? [t.table_id,changes.seat] : []),...(correctionTable?[correctionTable.id,correctionTable.version]:[])];
   // Choose the front position in the write itself, so concurrent returns do not
   // share a stale queue position. Beginner and expert queues remain independent.
   const assignments=Object.keys(changes).map(k=>k==='queued_at' && returnsToFront
     ? "queued_at=COALESCE((SELECT MIN(q.queued_at)-1 FROM tickets q WHERE q.status='waiting' AND q.kind=tickets.kind),?)"
-    : `${k}=?`).join(',');
-  const statements=[db.prepare(`UPDATE tickets SET ${assignments},version=?,last_op=? WHERE id=? AND version=?${extra}${correctionGuard}${sourceGuard}${reentryGuard}${nicknameGuard}`).bind(...args, ...(action==='reentry'?[currentNamespace(),payment]:[]), ...(checkNickname ? [final.nickname, id] : []))];
+    : `${k}=?`).map(a=>a+',').join('');
+  const statements=[db.prepare(`UPDATE tickets SET ${assignments}version=?,last_op=? WHERE id=? AND version=?${extra}${correctionGuard}${sourceGuard}${reentryGuard}${nicknameGuard}`).bind(...args, ...(action==='reentry'?[currentNamespace(),payment]:[]), ...(checkNickname ? [final.nickname, id] : []))];
+  if(lecture==='start') statements.push(db.prepare("INSERT OR REPLACE INTO ticket_lectures(event_namespace,ticket_id,started_at) SELECT ?,id,? FROM tickets WHERE id=? AND last_op=?").bind(currentNamespace(),now,id,op));
+  if(lecture==='clear') statements.push(db.prepare("DELETE FROM ticket_lectures WHERE event_namespace=? AND ticket_id=? AND EXISTS(SELECT 1 FROM tickets WHERE id=? AND last_op=?)").bind(currentNamespace(),id,id,op));
   if(paymentType) statements.push(db.prepare("INSERT INTO payments(id,ticket_id,amount,type,created_at,actor) SELECT ?,id,?,?,?,? FROM tickets WHERE id=? AND last_op=?").bind(op,payment,paymentType,now,s.user_id,id,op));
-  statements.push(db.prepare("INSERT INTO operations(id,actor,action,ticket_id,before_json,after_json,reason,created_at) SELECT ?,?,?,id,?,json_set(?, '$.queued_at', queued_at),?,? FROM tickets WHERE id=? AND last_op=?").bind(op,s.user_id,action,JSON.stringify(t),JSON.stringify(final),typeof b.reason==='string'?b.reason:null,now,id,op));
+  statements.push(db.prepare("INSERT INTO operations(id,actor,action,ticket_id,before_json,after_json,reason,created_at) SELECT ?,?,?,id,?,json_set(?, '$.queued_at', queued_at),?,? FROM tickets WHERE id=? AND last_op=?").bind(op,s.user_id,action,JSON.stringify(stored),JSON.stringify(final),typeof b.reason==='string'?b.reason:null,now,id,op));
   const result = await db.batch(statements);
   if (!result[0].meta.changes) {
     if (checkNickname) await rejectDuplicateNickname(final.nickname, id);
