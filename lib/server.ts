@@ -149,7 +149,7 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     const kindChanged = kind !== t.kind;
     const needsNewSeat = kindChanged && (t.status === 'playing' || t.status === 'seated');
     if (b.status !== t.status || b.table !== undefined || b.seat !== undefined || needsNewSeat || (!kindChanged && nickname === t.nickname)) {
-      const correction = await statusCorrection({...t, kind},b,s,now);
+      const correction = await statusCorrection(t,b,s,now);
       changes = correction.changes;
       correctionTable = correction.table;
       if (changes.paid !== undefined && changes.paid !== t.paid) {

@@ -158,7 +158,6 @@ export function TicketStatusEditor({ ticket, data, busy, error, offline, onSave 
       <select aria-label="種別" aria-describedby={noAvailableSeats ? seatWarningId : undefined} value={kind} disabled={busy || (needsSeat && !canChooseSeat)} onChange={event => {
       const next = event.target.value as Kind;
       setKind(next);
-      setSeat(next === ticket.kind ? originalSeat : '');
     }}>
       {targetTags(data).map(tag => <option key={tag.id} value={tag.id}>{tag.name}（{tag.id === 'beginner' ? 'B' : 'E'}）</option>)}
     </select></label>
