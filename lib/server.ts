@@ -13,6 +13,7 @@ const occupied = ['called','seated','playing'];
 const rows = async <T>(sql:string,...args:(string|number|null)[]) => (await database().prepare(sql).bind(...args).all<T>()).results;
 const getSettings = async () => (await database().prepare("SELECT *,COALESCE((SELECT fee FROM event_reentry_settings WHERE event_namespace=?),300) AS reentry_fee FROM settings WHERE id=1").bind(currentNamespace()).first<Settings>())!;
 function integer(value:unknown,min:number,max:number) { if(typeof value!=="number" || !Number.isInteger(value) || value<min || value>max) throw new HttpError(400,"数値の入力を確認してください。"); return value; }
+function optionalScore(value:unknown) { return value==null ? null : integer(value,0,10000000); }
 function text(value:unknown,max=30) { if(typeof value!=="string" || !value.trim() || value.trim().length>max) throw new HttpError(400,"入力内容を確認してください。"); return value.trim(); }
 async function replay(op:string,s:Session) {
   const old=await database().prepare("SELECT actor FROM operations WHERE id=?").bind(op).first<{actor:string}>();
@@ -202,9 +203,9 @@ async function mutate(request:Request,b:Record<string,unknown>) {
   } else if(action==='finish') {
     requireRole(s,['admin','dealer','operator']); state(['playing']);
     const table=await db.prepare("SELECT paused_at FROM game_tables WHERE id=?").bind(t.table_id).first<{paused_at:number|null}>();
-    changes={status:'finished',finished_at:now,final_chips:integer(b.score,0,10000000),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
+    changes={status:'finished',finished_at:now,final_chips:optionalScore(b.score),paused_ms:t.paused_ms+(table?.paused_at ? now-table.paused_at : 0)};
   } else if(action==='correct') {
-    requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:integer(b.score,0,10000000)};
+    requireRole(s,['admin']); state(['finished']); text(b.reason,200); changes={final_chips:optionalScore(b.score)};
   } else if(action==='hold') {
     requireRole(s,['admin','reception','operator']); state(['called']); if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。");
     if(now-(t.called_at ?? now)<180000) throw new HttpError(409,"呼び出しから3分経過後に不在を確定できます。");

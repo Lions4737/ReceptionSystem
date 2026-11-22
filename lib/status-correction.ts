@@ -36,9 +36,9 @@ export async function statusCorrection(ticket: Ticket, body: Record<string, unkn
     Object.assign(changes, { table_id: table.id, seat: body.seat, called_at: now, started_at: null, ends_at: null, finished_at: null, final_chips: null, paused_ms: 0 });
     if (target === 'playing') Object.assign(changes, { started_at: now, ends_at: now + ticket.minutes * 60000 });
   } else if (target === 'finished') {
-    if (typeof body.score !== 'number' || !Number.isInteger(body.score) || body.score < 0 || body.score > 10000000) throw new HttpError(400, '最終チップ数を入力してください（0点も入力できます）。');
+    if (body.score != null && (typeof body.score !== 'number' || !Number.isInteger(body.score) || body.score < 0 || body.score > 10000000)) throw new HttpError(400, '最終チップ数は0〜10000000の整数で入力してください（未入力なら記録なし）。');
     table = ticket.table_id ? await db.prepare('SELECT * FROM game_tables WHERE id=? AND archived_at IS NULL').bind(ticket.table_id).first<GameTable>() : null;
-    Object.assign(changes, { finished_at: now, final_chips: body.score, paused_ms: ticket.paused_ms + (ticket.status === 'playing' && table && table.paused_at !== null ? Math.max(0, now - table.paused_at) : 0) });
+    Object.assign(changes, { finished_at: now, final_chips: body.score ?? null, paused_ms: ticket.paused_ms + (ticket.status === 'playing' && table && table.paused_at !== null ? Math.max(0, now - table.paused_at) : 0) });
   } else {
     Object.assign(changes, { table_id: null, seat: null, called_at: null, started_at: null, ends_at: null, finished_at: null, final_chips: null, paused_ms: 0 });
     if (target === 'waiting') changes.queued_at = now;

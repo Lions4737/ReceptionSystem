@@ -63,3 +63,9 @@ export function estimateWait(kind: Kind, tables: GameTable[], tickets: Ticket[],
   for(let i=0;i<waiting;i++) { slots.sort((a,b)=>a-b); slots[0]+=(minutes+5)*60000; }
   return Math.max(0,Math.ceil((Math.min(...slots)-now)/60000));
 }
+
+/** Form value for final chips: blank means "no score recorded" (null). */
+export function scoreValue(value: FormDataEntryValue | null): number | null {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text === '' ? null : Number(text);
+}
