@@ -98,8 +98,8 @@ export function TableSettings({ data, offline, onChange }: Props) {
       <button className="button primary" disabled={disabled || adding || !!removing} onClick={() => { setAdding(true); setError(''); }}>＋ テーブルを追加</button>
     </div>
     <p className="table-settings-summary">{data.tables.length}卓 <span>／</span> 合計 {totalSeats}席</p>
-    {offline && !moving && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
-    {error && !moving && <p className="settings-error" role="alert">{error}</p>}
+    {offline && !moving && !removing && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
+    {error && !moving && !removing && <p className="settings-error" role="alert">{error}</p>}
     <span className="sr-only" role="status">{busy ? '保存中です' : ''}</span>
     {adding && <form className="table-config-editor" onSubmit={async event => {
       event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -157,9 +157,12 @@ export function TableSettings({ data, offline, onChange }: Props) {
       })}
     </tbody></table></div>
     {!data.tables.length && <div className="empty"><h3>テーブルを追加してください</h3><p>テーブルを用意すると、その対象の受付・席の割り当てができます。</p></div>}
-    {removing && <div className="table-config-editor" role="group" aria-label="テーブル削除の確認">
-      <h3>「{removing.name}」を削除しますか？</h3><p className="form-help">テーブルを一覧から削除します。過去の受付記録は残ります。</p>
-      <div className="table-config-actions"><button className="button danger" disabled={disabled} onClick={async () => { if (await run({ action: 'archive', table: removing.id, version: removing.version })) setRemoving(null); }}>テーブルを削除する</button><button className="button outline" disabled={busy} onClick={() => { setRemoving(null); setError(''); }}>キャンセル</button></div>
-    </div>}
+    {removing && <TableMoveDialog title={`「${removing.name}」を削除しますか？`} busy={busy} completed={false}
+      onClose={() => { if (!lock.current) { setRemoving(null); setError(''); } }}>
+      {offline && <p className="settings-error" role="alert">接続を確認しています。変更する前に最新の状態を取得してください。</p>}
+      {error && <p className="settings-error" role="alert">{error}</p>}
+      <p className="form-help">テーブルを一覧から削除します。過去の受付記録は残ります。</p>
+      <div className="table-config-actions"><button className="button danger" disabled={disabled} onClick={async () => { if (await run({ action: 'archive', table: removing.id, version: removing.version })) setRemoving(null); }}>{busy ? '削除中…' : 'テーブルを削除する'}</button><button className="button outline" disabled={busy} onClick={() => { setRemoving(null); setError(''); }}>キャンセル</button></div>
+    </TableMoveDialog>}
   </section>;
 }
