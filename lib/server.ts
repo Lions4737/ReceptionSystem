@@ -112,11 +112,16 @@ async function join(request:Request,b:Record<string,unknown>) {
   const previous = proxy ? null : await db.prepare('SELECT nickname FROM tickets WHERE player_id=? ORDER BY id DESC LIMIT 1').bind(s.user_id).first<{nickname:string}>();
   const nickname = previous?.nickname ?? text(b.nickname);
   const player=proxy ? 'proxy-'+crypto.randomUUID() : s.user_id;
-  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250 AND NOT EXISTS(SELECT 1 FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold')) ${previous ? '' : `AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname})`}`).bind(player,dayKey(now),nickname,kind,now,now,op,player,...(previous?[]:[nickname]));
+  const insert=db.prepare(`INSERT INTO tickets(player_id,day,nickname,kind,queued_at,created_at,fee,minutes,initial_chips,last_op) SELECT ?,?,?,?,?,?,fee,minutes,chips,? FROM settings WHERE id=1 AND ${kind==='beginner'?'beginner_open':'expert_open'}=1 AND (SELECT COUNT(*) FROM tickets WHERE status IN ('waiting','called','seated','playing','hold'))<250 AND NOT EXISTS(SELECT 1 FROM tickets WHERE player_id=? AND status IN ('waiting','called','seated','playing','hold')) AND NOT EXISTS(SELECT 1 FROM tickets WHERE ${activeNickname})`).bind(player,dayKey(now),nickname,kind,now,now,op,player,nickname);
   const results=await db.batch([insert,db.prepare("INSERT INTO operations(id,actor,action,ticket_id,created_at) SELECT ?,?,'join',id,? FROM tickets WHERE last_op=?").bind(op,s.user_id,now,op)]);
   if (!results[0].meta.changes) {
     if(await ownActive()) return response({ok:true},200);
-    if(!previous) await rejectDuplicateNickname(nickname);
+    // Returning visitors keep their previous nickname, so they cannot pick another one themselves.
+    if(previous) {
+      if(await db.prepare(`SELECT 1 FROM tickets WHERE ${activeNickname} LIMIT 1`).bind(nickname).first()) throw new HttpError(409, `前回と同じ名前「${nickname}」の方が受付中です。お手数ですが受付スタッフにお声がけください。`);
+    } else await rejectDuplicateNickname(nickname);
+    const activeCount=await db.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status IN ('waiting','called','seated','playing','hold')").first<{n:number}>();
+    if((activeCount?.n ?? 0)>=250) throw new HttpError(409, "ただいま受付が大変混み合っています（受付中が上限の250件に達しました）。しばらくしてから再度お試しください。");
     throw new HttpError(409, "現在この種別の受付を停止しています。");
   }
   return response({ok:true},201);
@@ -228,7 +233,7 @@ async function mutate(request:Request,b:Record<string,unknown>) {
     if(s.role!=='player') requireRole(s,['admin','reception','operator']); state(['waiting','called','hold']);
     if(t.paid) throw new HttpError(409,"入金済みの受付は責任者が返金・取消してください。"); changes={status:'cancelled',table_id:null,seat:null};
   } else if(action==='refund') {
-    requireRole(s,['admin']); state(['called','seated']); if(!t.paid) throw new HttpError(409,"入金がありません。"); text(b.reason,200);
+    requireRole(s,['admin']); state(['waiting','called','seated','hold']); if(!t.paid) throw new HttpError(409,"入金がありません。"); text(b.reason,200);
     changes={status:'cancelled',paid:0,table_id:null,seat:null}; payment=-t.fee; paymentType='refund';
   } else throw new HttpError(400,"不明な操作です。");
   // Any status/kind/payment change ends the lecture.

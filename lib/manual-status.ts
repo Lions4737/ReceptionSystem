@@ -3,9 +3,14 @@ import type { Role, Status, Ticket } from './types';
 export const manualStatuses: Status[] = ['waiting', 'called', 'seated', 'playing', 'finished', 'hold', 'cancelled'];
 export const assignedStatuses: Status[] = ['called', 'seated', 'playing'];
 
-// Called is before payment; seated/playing/finished are after payment.
+// Seated/playing/finished require payment. Moving back to waiting/called/hold
+// keeps the recorded payment, so the guest is not asked to pay twice.
+// Cancelling releases the payment (refund).
 export function manualStatusPaid(ticket: Ticket, target: Status): number {
-  return target === ticket.status ? ticket.paid : Number(['seated','playing','finished'].includes(target));
+  if (target === ticket.status) return ticket.paid;
+  if (['seated','playing','finished'].includes(target)) return 1;
+  if (target === 'cancelled') return 0;
+  return ticket.paid;
 }
 
 export function manualStatusIssue(ticket: Ticket, target: Status, role: Role): string | null {
